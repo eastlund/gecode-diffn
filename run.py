@@ -8,7 +8,7 @@ implementations = ["sweep", "original"]
 
 
 
-timeout = 1
+timeout = 10
 #ex = "mzn2fzn -G newgecode filter.mzn ar_1_3.dzn"
 mzn2fzn = "mzn2fzn -G newgecode"
 fzn_executable = "/home/eagiz/Tools/gecode-5.0.0/tools/flatzinc/fzn-gecode"
@@ -84,11 +84,12 @@ def parse_output(sat_problem, implementation, outputs, d):
                     time = "t/o"
                     final_sol = "none"
                     optimal = False
-        if not d[implementation].get(data_file):
-            d[implementation][data_file] = {}
-        d[implementation][data_file] = (optimal, time, final_sol)
+        if not d[data_file].get(implementation):
+            d[data_file][implementation] = {}
+        d[data_file][implementation] = (optimal, time, final_sol)
 
 def sort_alg_rect_packing(x):
+    #print "x: " + x
     temp = x.rpartition('_')[0]
     n = temp.rpartition('rpp')[2]
     try:
@@ -104,13 +105,13 @@ sort_algs = {'rect_packing_mznc2014': sort_alg_rect_packing}
 
 def latex_print(benchmark, d):
     print benchmark
-    for implementation, results in sorted(d.iteritems(), key=lambda x: x[0]):
-        print("--- {0} ---".format(implementation))
-        for data_file in sorted(results.iteritems(), key=lambda x: sort_algs[benchmark](x[0])):
-            print data_file[0]
-            print("\\\\ \\texttt{{{0}}}".format(data_file[0]))
+    for data_file, results in sorted(d.iteritems(), key=lambda x: sort_algs[benchmark](x[0])):
+        #print("--- {0} ---".format(data_file))
+        print("\\\\ \\texttt{{{0}}}".format(data_file))
+        for implementation in sorted(results.iteritems()):
+            #print data_file[0]
             #print("\\\\ \\texttt{{n={0}}}".format(n))
-            (t, (optimal, time, sol)) = data_file
+            (t, (optimal, time, sol)) = implementation
             if optimal:
                 print("&\t\\textbf{%s} & \\textbf{%s}" % (sol, time))
             else:
@@ -133,13 +134,18 @@ def main():
         #command = "{0} {1}{2}{3} {5}{6} --output-time".format(ex, bench_path, benchmark[0], benchmark[1], data_file)
     for benchmark in benchmarks:
         scenarios = scenario_generator(benchmark)
-        l = []
-        for scenario in scenarios:
-            #print scenario
-            prepare(scenario)
-            l.append(run_scenario(benchmark, scenario))
-        d["sweep"] = {}
-        parse_output(True, "sweep", l, d)
+        for implementation in implementations:
+            print implementation
+            os.environ["OVERLAPVERSION"] = implementation
+            l = []
+            for scenario in scenarios:
+                #print scenario
+                data_file = scenario.rpartition('/')[2]
+                if not d.get(data_file):
+                    d[str(data_file)] = {}
+                prepare(scenario)
+                l.append(run_scenario(benchmark, scenario))
+            parse_output(True, implementation, l, d)
         print d
         latex_print(benchmark[1], d)
 
