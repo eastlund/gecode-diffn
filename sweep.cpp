@@ -258,7 +258,6 @@ protected:
   // Function for pruning the lower bound of object o in dimension d
   virtual ExecStatus pruneMin(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
-    ExecStatus pStatus = ES_FIX;
     
     Region r(home); // Region for storage
 
@@ -322,25 +321,22 @@ protected:
         }
       }
 
-      if (o[d].min() < c[d]) { // Is new min larger than old?
-        pStatus = ES_NOFIX;
+      ModEvent me = o[d].gq(home, c[d]); // prune o
+      if (me_failed(me)) {
+        return ES_FAILED;
+      } else if (me_modified(me)) {
+        return ES_NOFIX;
       } else {
-        pStatus = ES_FIX;
+        return ES_FIX;
       }
-
-      GECODE_ME_CHECK(o[d].gq(home, c[d])); // prune minimum if target found
     } else {
-      pStatus = ES_FAILED;
+      return ES_FAILED;
     }
-
-    return pStatus;
   }
 
   // Function for pruning the upper bound of object o in dimension d
   virtual ExecStatus pruneMax(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
-    ExecStatus pStatus = ES_FIX;
-
     Region r(home);
 
     /* Init c and n*/
@@ -404,18 +400,17 @@ protected:
         }
       }
 
-      if (o[d].max() > c[d]) { // is new max smaller than old?
-        pStatus = ES_NOFIX;
+      ModEvent me = o[d].lq(home, c[d]); // prune o
+      if (me_failed(me)) {
+        return ES_FAILED;
+      } else if (me_modified(me)) {
+        return ES_NOFIX;
       } else {
-        pStatus = ES_FIX; // We could not prune anything
+        return ES_FIX;
       }
-
-      GECODE_ME_CHECK(o[d].lq(home, c[d])); // prune minimum if target found
     } else {
-      pStatus = ES_FAILED; // No feasible sweep point found, report failure
-    }
-
-    return pStatus;
+      return ES_FAILED; // No feasible sweep point found, report failure
+    } 
   }
 
   // R is a collection of rectangles participating in the problem
@@ -430,7 +425,7 @@ protected:
         Object *o = Objects->collection[i];
 
         if (o->fixed) { // TODO: this is likely a subpar SEPERATE-implementation
-          continue;          
+          continue;
         }
         
         ForbiddenRegions F(&r); 
