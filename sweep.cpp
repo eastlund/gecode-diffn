@@ -38,12 +38,16 @@ public:
   int *max; // maximal per dimension
 };
 
+/* An object consists of the object origin in each dimension d, the
+ * length in dimension d, its id, and whether or not it is fixed,
+ * i.e., if it needs to be considered while filtering.
+ */
 class Object {
 public:
   ViewArray<IntView> x; // Object origins
   int *l; // Object lengths
   int id;
-  bool fixed;
+  bool fixed; 
   
   bool isSame(Object *);
 
@@ -56,8 +60,8 @@ bool Object::isSame(Object *o) {
 
 class ForbiddenRegions {
 private:
-  int RRpos;
-  int length;
+  int RRpos; // Current RR position in GetFR
+  int length; // Amount of FRs in collection
 public:
   Support::DynamicArray<FR*, Region> collection; // TODO: this will be private in the future
 public:
@@ -83,11 +87,11 @@ void ForbiddenRegions::insert(FR *f) {
 }
 
 class OBJECTS {
+private:
+  int length;
 public:
   Support::DynamicArray<Object*, Space> collection; 
   int size();
-  int length;
-  
   void insert(Object*);
 
   OBJECTS(Space& s) : collection(s), length(0) {};
@@ -102,15 +106,13 @@ void OBJECTS::insert(Object *f) {
   ++length;
 }
 
-// The no-overlap propagator
+// The diffn propagator
 class NonOverlapping : public Propagator {
 protected:
-  OBJECTS *Objects;
-  //std::list<Object*> NonFixed;
-  //std::list<Object*> Fixed;
-
-  int dimensions;
+  OBJECTS *Objects; // Objects being filtered
+  int dimensions; // Number of dimensions of the problem
   
+  // Function for checking if o can possibly overlap f
   bool overlaps(FR *f, Object *o, int k) {
     for (int d = 0; d < k; d++) {
       if ((o->x[d].max() < f->min[d]) || (o->x[d].min() > f->max[d])) {
@@ -120,6 +122,7 @@ protected:
     return true;
   }
 
+  // Generates relative FRs to the object o and stores them in F
   void genOutBoxes(Home home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
@@ -146,6 +149,7 @@ protected:
           exists = false;
         }
 
+        // Only add forbidden region if it exists
         if (exists) {
           F->insert(f);
         }
@@ -178,12 +182,12 @@ protected:
 
   void genOutBoxesMerge(Home home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     Region r(home);
-    Support::StaticStack<FR*,Region> recent(r, 2);
+    Support::StaticStack<FR*,Region> recent(r, 2); // merge stack for temporary storage of FRs (for merge checking)
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every other object <> o
-        FR *f = (FR *) static_cast<Space&>(home).alloc<FR>(1);//new FR(home, k);
+        FR *f = (FR *) static_cast<Space&>(home).alloc<FR>(1);
         f->min = static_cast<Space&>(home).alloc<int>(dimensions);
         f->max = static_cast<Space&>(home).alloc<int>(dimensions);
 
@@ -206,18 +210,18 @@ protected:
         }
 
         if (exists) {
-          if (recent.entries() == 2) {
+          if (recent.entries() == 2) { // Check if previous 2 FRs can be merged
             FR *A = recent.pop();
             FR *B = recent.pop();
             int r = mergeTest(A, B, k);
 
-            if (r == 0) {
-              F->insert(A);
-              recent.push(B);
-            } else if (r == 1) {
+            if (r == 0) { // no merge possible
+              F->insert(B);
               recent.push(A);
-            } else {
-              recent.push(B);
+            } else if (r == 1) { // B is inside A
+              recent.push(A);
+            } else { // A is inside B
+              recent.push(B); 
             }
           }
           recent.push(f);
@@ -225,7 +229,7 @@ protected:
       }
     }
     
-    while (!recent.empty()) {
+    while (!recent.empty()) { // Make sure no FR is still on merge stack
       F->insert(recent.pop());
     }
   }
@@ -240,21 +244,23 @@ protected:
     return false;
   }
 
+  // Get next infeasible FR
   FR *getFR(FR *f, int k, int *c, ForbiddenRegions *actrs) {
     for (int i = 0; i < actrs->size(); i++) {
-      FR *actrsF = actrs->getRR();
-      if (!isFeasible(actrsF, k, c)) { // forbidden region for c found
-        return actrsF;
+      FR *f = actrs->getRR(); // Using RR for getting the next FR
+      if (!isFeasible(f, k, c)) { // forbidden region for c found
+        return f; // f is an infeasible FR
       }
     }
-    return NULL;
+    return NULL; // return NULL if no infeasible FR was found
   }
 
+  // Function for pruning the lower bound of object o in dimension d
   virtual ExecStatus pruneMin(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
     ExecStatus pStatus = ES_FIX;
     
-    Region r(home);
+    Region r(home); // Region for storage
 
     /* Init c and n*/
     int *c = r.alloc<int>(k); // sweep-point
@@ -269,9 +275,11 @@ protected:
       n[i] = o[i].max() + 1;
     }
 
+    // Get next FR
     FR *currentF = getFR(currentF, k, c, F);
     bool infeasible = (currentF != NULL);
 
+    // While we have not failed and c is infeasible
     while (b and infeasible) {
       // update jump-vector
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
@@ -328,6 +336,7 @@ protected:
     return pStatus;
   }
 
+  // Function for pruning the upper bound of object o in dimension d
   virtual ExecStatus pruneMax(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
     ExecStatus pStatus = ES_FIX;
@@ -347,9 +356,11 @@ protected:
       n[i] = o[i].min() - 1;
     }
 
+    // Get next FR
     FR *currentF = getFR(currentF, k, c, F);
     bool infeasible = (currentF != NULL);
 
+    // While we have not failed and c is infeasible
     while (b and infeasible) {
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
         n[i] = std::max(n[i], currentF->min[i] - 1);
@@ -410,12 +421,9 @@ protected:
   // R is a collection of rectangles participating in the problem
   bool filter(Home home, int k) {
     Region r(home); // TODO: maybe new region for each object?
-    //std::list<Object> *O = r.alloc< std::list<Object> >(1);
-    //std::list<Object> *ToBeFiltered = static_cast<Space&>(home).alloc< std::list<Object> >(1);
 
     bool nonfix = true;
 
-    //std::cout << "FILTER\n";
     while (nonfix) {
       nonfix = false;
       for (int i = 0; i < Objects->size(); i++) {
@@ -455,7 +463,7 @@ protected:
 
 public:
   // Create propagator and initialize
-  NonOverlapping(Home home,
+  NonOverlapping(Home home, // Constructor for 2D
                  ViewArray<IntView>& x0,int w0[],
                  ViewArray<IntView>& y0,int h0[])
     : Propagator(home)
@@ -463,6 +471,7 @@ public:
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home);
 
+    // Create corresponding objects for the ViewArrays and arrays
     for (int i = 0; i < x0.size(); i++) {
       Object *o = ((Space&) home).alloc<Object>(1);
       o->l = ((Space&) home).alloc<int>(2);
@@ -544,8 +553,6 @@ public:
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-    //filter((Home) home, 2, Objects);       
-        
     ExecStatus fStatus = filter((Home) home, 2) ? ES_FIX : ES_FAILED;
 
     if (fStatus == ES_FAILED) {
@@ -564,24 +571,6 @@ public:
           continue;
         }
 
-        // // x overlap
-        // if (first->x[0].min()+first->l[0] > second->x[0].max() && first->x[0].max() < second->x[0].min()+second->l[0]) {
-        //   // i cannot be above j
-        //   if (first->x[1].max() < second->x[1].min()+second->l[1]) {
-        //     GECODE_ME_CHECK(first->x[1].lq(home, second->x[1].max()-first->l[1]));
-        //     GECODE_ME_CHECK(second->x[1].gq(home, first->x[1].min()+first->l[1]));
-        //   }
-        // }
-
-        // //y-overlap
-        // if (first->x[1].min()+first->l[1] > second->x[1].max() && first->x[1].max() < second->x[1].min()+second->l[1]) {
-        //   // i cannot be to the right of j                    
-        //   if (first->x[0].max() < second->x[0].min()+second->l[0]) {
-        //     GECODE_ME_CHECK(first->x[0].lq(home, second->x[0].max()-first->l[0]));
-        //     GECODE_ME_CHECK(second->x[0].gq(home, first->x[0].min()+first->l[0]));
-        //   } 
-        // }
-
           //Subsumption check
           //Potential overlap on x-axis
         if (first->x[0].max() + first->l[0] > second->x[0].min() && second->x[0].min() >= first->x[0].min()) {
@@ -594,11 +583,9 @@ public:
     }
 
     if (subsumed) {
-      //std::cout << "Subsumed\n";
       return home.ES_SUBSUMED(*this);
     } else {
       return fStatus;
-      //return ES_NOFIX;
     }
   }
 };
