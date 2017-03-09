@@ -46,11 +46,10 @@ public:
   ViewArray<IntView> x; // Object origins
   int *l; // Object lengths
   int id;
-  bool fixed; 
   
   bool isSame(Object *);
 
-  Object() : fixed(false) {}
+  //Object() : fixed(false) {}
 };
 
 bool Object::isSame(Object *o) {
@@ -69,6 +68,7 @@ public:
   FR* getRR();
   ForbiddenRegions(Region*);
 };
+
 
 ForbiddenRegions::ForbiddenRegions(Region *r) : collection(*r), length(0), RRpos(0) {}
 
@@ -92,9 +92,17 @@ public:
   Support::DynamicArray<Object*, Space> collection; 
   int size();
   void insert(Object*);
+  void prettyPrint();
 
   OBJECTS(Space& s) : collection(s), length(0) {};
 };
+
+void OBJECTS::prettyPrint() {
+  for (int i = 0; i < size(); i++) {
+    Object *o = collection[i];
+    std::cout << o->x << "\n";
+  }
+}
 
 int OBJECTS::size(void) {
   return length;
@@ -110,6 +118,8 @@ class NonOverlapping : public Propagator {
 protected:
   OBJECTS *Objects; // Objects being filtered
   int dimensions; // Number of dimensions of the problem
+
+  int pivot;
   
   // Function for checking if o can possibly overlap f
   bool overlaps(FR *f, Object *o, int k) {
@@ -414,16 +424,11 @@ protected:
     Region r(home); // TODO: maybe new region for each object?
 
     bool nonfix = true;
-    bool allFixed = true;
 
     while (nonfix) {
       nonfix = false;
-      for (int i = 0; i < Objects->size(); i++) {
+      for (int i = 0; i < pivot; i++) {
         Object *o = Objects->collection[i];
-
-        if (o->fixed) { // TODO: this is likely a subpar SEPERATE-implementation
-          continue;
-        }
         
         ForbiddenRegions F(&r); 
         genOutBoxesMerge(home, &F, Objects, k, o);
@@ -441,20 +446,21 @@ protected:
     }
 
     // Check if any objects have become fixed
-    for (int i = 0; i < Objects->size(); i++) {
+    for (int i = 0; i < pivot; i++) { // This pivot solution seems a bit slower compared to using fixed boolean attribute per object
         Object *o = Objects->collection[i];
-        if (o->x.assigned() && !o->fixed) {
-          o->x.cancel(home, *this, PC_INT_DOM);
-          o->fixed = true;
-        } else if (!o->x.assigned()) {
-          allFixed = false;
+        if (o->x.assigned()) {
+          Objects->collection[i] = Objects->collection[pivot-1];
+          Objects->collection[pivot-1] = o;
+          --pivot; // Move pivot point to the left (we have one more fixed object)
+          --i; // Need to check this position again, as it now contains other object
         }
     }
 
-    // TODO: can we do better? Maybe count number of fixed instead? (doesn't seem to be faster though (maybe because we need to store it in space?)
-    if (allFixed) {
+    if (pivot == 0) {
+      //Objects->prettyPrint();
       return home.ES_SUBSUMED(*this);
     }
+
 
     return ES_FIX;
   }
@@ -487,6 +493,7 @@ public:
     }
 
     dimensions = 2;
+    pivot = Objects->size(); // All objects left of pivot are non-fixed
   }
 
   // Post no-overlap propagator
@@ -514,6 +521,7 @@ public:
   NonOverlapping(Space& home, bool share, NonOverlapping& p)
     : Propagator(home,share,p) {
     dimensions = p.dimensions;
+    pivot = p.pivot;
 
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home);
@@ -527,7 +535,6 @@ public:
         o->l[j] = pObj->l[j];
       }
       o->id = pObj->id;
-      o->fixed = pObj->fixed;
       Objects->insert(o);
     }
 
@@ -596,3 +603,4 @@ void nonOverlapping(Home home,
   if (NonOverlapping::post(home,vx,wc,vy,hc) != ES_OK)
     home.fail();
 }
+
