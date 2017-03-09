@@ -27,7 +27,6 @@
  */
 
 #include <gecode/int.hh>
-#include <list> // TODO: remove
 
 using namespace Gecode;
 using namespace Gecode::Int;
@@ -245,7 +244,7 @@ protected:
   }
 
   // Get next infeasible FR
-  FR *getFR(FR *f, int k, int *c, ForbiddenRegions *actrs) {
+  FR *getFR(int k, int *c, ForbiddenRegions *actrs) {
     for (int i = 0; i < actrs->size(); i++) {
       FR *f = actrs->getRR(); // Using RR for getting the next FR
       if (!isFeasible(f, k, c)) { // forbidden region for c found
@@ -275,11 +274,10 @@ protected:
     }
 
     // Get next FR
-    FR *currentF = getFR(currentF, k, c, F);
-    bool infeasible = (currentF != NULL);
+    FR *currentF = getFR(k, c, F);
 
     // While we have not failed and c is infeasible
-    while (b and infeasible) {
+    while (b and currentF) {
       // update jump-vector
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
         n[i] = std::min(n[i], currentF->max[i] + 1);
@@ -301,8 +299,7 @@ protected:
         }
       }
       // Update currentF and check if it is infeasible still
-      currentF = getFR(currentF, k, c, F);
-      infeasible = (currentF != NULL);
+      currentF = getFR(k, c, F);
     }
 
     if (b) { 
@@ -353,11 +350,11 @@ protected:
     }
 
     // Get next FR
-    FR *currentF = getFR(currentF, k, c, F);
-    bool infeasible = (currentF != NULL);
+    FR *currentF = getFR(k, c, F);
+    //bool infeasible = (currentF != NULL);
 
     // While we have not failed and c is infeasible
-    while (b and infeasible) {
+    while (b and currentF) {
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
         n[i] = std::max(n[i], currentF->min[i] - 1);
       }
@@ -378,8 +375,8 @@ protected:
       }
 
       // Update currentF and check if it is infeasible still
-      currentF = getFR(currentF, k, c, F);
-      infeasible = (currentF != NULL);
+      currentF = getFR(k, c, F);
+      //infeasible = (currentF != NULL);
     }
 
     if (b) { 
@@ -414,10 +411,11 @@ protected:
   }
 
   // R is a collection of rectangles participating in the problem
-  bool filter(Home home, int k) {
+  ExecStatus filter(Home home, int k) {
     Region r(home); // TODO: maybe new region for each object?
 
     bool nonfix = true;
+    bool allFixed = true;
 
     while (nonfix) {
       nonfix = false;
@@ -435,12 +433,11 @@ protected:
           ExecStatus pMinStatus = pruneMin(home, o->x, d, k, &F);
           ExecStatus pMaxStatus = pruneMax(home, o->x, d, k, &F);
           if (pMinStatus == ES_FAILED || pMaxStatus == ES_FAILED) {
-            return false;
+            return ES_FAILED;
           } else if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
             nonfix = true; // We pruned a bound, not at fixpoint
           }
         }
-
       }
     }
 
@@ -450,10 +447,17 @@ protected:
         if (o->x.assigned() && !o->fixed) {
           o->x.cancel(home, *this, PC_INT_DOM);
           o->fixed = true;
+        } else if (!o->x.assigned()) {
+          allFixed = false;
         }
     }
 
-    return true;
+    // TODO: can we do better? Maybe count number of fixed instead? (doesn't seem to be faster though (maybe because we need to store it in space?)
+    if (allFixed) {
+      return __ES_SUBSUMED;
+    }
+
+    return ES_FIX;
   }
 
 public:
@@ -496,7 +500,7 @@ public:
     return ES_OK;
   }
 
-  // Dispose propagator and return its sizestd::list<Object*>
+  // Dispose propagator and return its size
   virtual size_t dispose(Space& home) {
     for (int i = 0; i < Objects->size(); i++) { 
       Objects->collection[i]->x.cancel(home, *this, PC_INT_DOM);
@@ -534,9 +538,9 @@ public:
     return new (home) NonOverlapping(home,share,*this);
   }
     
-  // Return cost (defined as cheap quadratic)
+  // Return cost (defined as expensive quadratic)
   virtual PropCost cost(const Space&, const ModEventDelta&) const {
-    return PropCost::quadratic(PropCost::LO,2*((int) 2));
+    return PropCost::quadratic(PropCost::HI,dimensions*Objects->size());
   }
 
   // TODO: why do we need this?
@@ -548,41 +552,19 @@ public:
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-    ExecStatus fStatus = filter((Home) home, 2) ? ES_FIX : ES_FAILED;
+    ExecStatus fStatus = filter((Home) home, 2);// ? ES_FIX : ES_FAILED;
 
     if (fStatus == ES_FAILED) {
       return ES_FAILED;
     }
 
-    bool subsumed = true;
-    int i,j;
-
-    // TODO: this makes things a tad slower, figure out how to perform subsumption check on the go?
-    for (int f = 0; f < Objects->size(); f++) {
-      Object *first = Objects->collection[f];
-      for (int s = 0; s < Objects->size(); s++) {
-        Object *second = Objects->collection[s];
-        if (first->id == second->id) { // Don't run on a pair of identical rectangles
-          continue;
-        }
-
-          //Subsumption check
-          //Potential overlap on x-axis
-        if (first->x[0].max() + first->l[0] > second->x[0].min() && second->x[0].min() >= first->x[0].min()) {
-          // Potential overlap on y-axis
-          if(first->x[1].max() + first->l[1] > second->x[1].min() && second->x[1].min() >= first->x[1].min()) {
-            subsumed = false; // Potential overlap on both axis, can't subsume
-          }
-        }
-      }
-    }
-
-    if (subsumed) {
+    if (fStatus != ES_FIX) {
       return home.ES_SUBSUMED(*this);
     } else {
       return fStatus;
     }
   }
+ 
 };
 
 /*
