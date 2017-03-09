@@ -179,16 +179,16 @@ protected:
     return r;
   }
 
-  void genOutBoxesMerge(Home home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  void genOutBoxesMerge(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     Region r(home);
     Support::StaticStack<FR*,Region> recent(r, 2); // merge stack for temporary storage of FRs (for merge checking)
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every other object <> o
-        FR *f = (FR *) static_cast<Space&>(home).alloc<FR>(1);
-        f->min = static_cast<Space&>(home).alloc<int>(dimensions);
-        f->max = static_cast<Space&>(home).alloc<int>(dimensions);
+        FR *f = (FR *) home.alloc<FR>(1);
+        f->min = home.alloc<int>(dimensions);
+        f->max = home.alloc<int>(dimensions);
 
         bool exists = true; // Assume f exists
 
@@ -255,7 +255,7 @@ protected:
   }
 
   // Function for pruning the lower bound of object o in dimension d
-  virtual ExecStatus pruneMin(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
+  ExecStatus pruneMin(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
     
     Region r(home); // Region for storage
@@ -332,7 +332,7 @@ protected:
   }
 
   // Function for pruning the upper bound of object o in dimension d
-  virtual ExecStatus pruneMax(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
+  ExecStatus pruneMax(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
     bool b = true;
     Region r(home);
 
@@ -376,7 +376,6 @@ protected:
 
       // Update currentF and check if it is infeasible still
       currentF = getFR(k, c, F);
-      //infeasible = (currentF != NULL);
     }
 
     if (b) { 
@@ -411,7 +410,7 @@ protected:
   }
 
   // R is a collection of rectangles participating in the problem
-  ExecStatus filter(Home home, int k) {
+  ExecStatus filter(Space &home, int k) {
     Region r(home); // TODO: maybe new region for each object?
 
     bool nonfix = true;
@@ -454,7 +453,7 @@ protected:
 
     // TODO: can we do better? Maybe count number of fixed instead? (doesn't seem to be faster though (maybe because we need to store it in space?)
     if (allFixed) {
-      return __ES_SUBSUMED;
+      return home.ES_SUBSUMED(*this);
     }
 
     return ES_FIX;
@@ -552,17 +551,18 @@ public:
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-    ExecStatus fStatus = filter((Home) home, 2);// ? ES_FIX : ES_FAILED;
+    return filter((Home) home, 2);
+    // ExecStatus fStatus = filter((Home) home, 2);// ? ES_FIX : ES_FAILED;
 
-    if (fStatus == ES_FAILED) {
-      return ES_FAILED;
-    }
+    // if (fStatus == ES_FAILED) {
+    //   return ES_FAILED;
+    // }
 
-    if (fStatus != ES_FIX) {
-      return home.ES_SUBSUMED(*this);
-    } else {
-      return fStatus;
-    }
+    // if (fStatus != ES_FIX) {
+    //   return home.ES_SUBSUMED(*this);
+    // } else {
+    //   return fStatus;
+    // }
   }
  
 };
