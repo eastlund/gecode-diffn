@@ -217,8 +217,9 @@ protected:
   }
 
   void genOutBoxesMerge(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
-    Region r(home);
-    Support::StaticStack<FR*,Region> recent(r, 2); // merge stack for temporary storage of FRs (for merge checking)
+    int inQueue = 0;
+    FR *fst = NULL;
+    FR *snd = NULL;
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
@@ -241,36 +242,50 @@ protected:
           }
         }
 
-        if (!overlaps(f, o, k)) { // do not add if o does not overlap with f
+        if (!overlaps(f, o, k)) { // Do not add if o does not overlap with f
           exists = false;
         }
 
         if (exists) {
-          if (recent.entries() == 2) { // Check if previous 2 FRs can be merged
-            FR *A = recent.pop();
-            FR *B = recent.pop();
-            int r = completelyOverlaps(A, B, k);
+          if (inQueue == 2) { // Check if previous 2 FRs can be merged
+            int r = completelyOverlaps(fst, snd, k);
 
-            if (r == 0) { // A and B don't overshadow eachother
-              if (combine(A, B, k)) {
-                recent.push(A); // B is merged into A
+            if (r == 0) { // fst and snd don't completely overlap one another
+              if (combine(fst, snd, k)) { // Can they be combined in another way?
+                snd = NULL; // snd was merged into fst
+                inQueue--;
               } else {
-                F->insert(B);
-                recent.push(A);
+                F->insert(fst); // No merge possible, remove fst from queue
+                fst = snd; // Advance queue one step
+                snd = NULL;
+                inQueue--;
               }
-            } else if (r == 1) { // B is inside A
-              recent.push(A);
-            } else { // A is inside B
-              recent.push(B); 
+            } else if (r == 1) { // snd is inside fst
+              snd = NULL; // Remove snd from queue
+              inQueue--;
+            } else { // fst is inside snd
+              fst = snd; // Advance queue one step
+              snd = NULL;
+              inQueue--;
             }
           }
-          recent.push(f);
+          // Add new FR f to queue
+          if (fst == NULL) {
+            fst = f;
+          } else {
+            snd = f;
+          }
+          inQueue++;
         }
       }
     }
-    
-    while (!recent.empty()) { // Make sure no FR is still on merge stack
-      F->insert(recent.pop());
+
+    if (fst != NULL) {
+      F->insert(fst);
+    }
+
+    if (snd != NULL) {
+      F->insert(snd);
     }
   }
 
