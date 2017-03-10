@@ -169,24 +169,51 @@ protected:
   // 0 if no merge possible
   // 1 if B can be removed
   // 2 if A can be removed
-  int mergeTest(FR *A, FR *B, int k) {
+  int completelyOverlaps(FR *A, FR *B, int k) {
     int r = 0;
     for (int d = 0; d < k; d++) {
       if (A->min[d] <= B->min[d] && A->max[d] >= B->max[d]) {
         if (r == 2) {
           return 0;
         }
-        r = 1;
+        r = 1; // A completely overlaps B in dimension d
       } else if (A->min[d] >= B->min[d] && A->max[d] <= B->max[d]) {
         if (r == 1) {
           return 0;
         }
-        r = 2;
+        r = 2; // B completely overlaps A in dimension d
       } else {
-        return 0;
+        return 0; // No complete overlap
       }
     }
     return r;
+  }
+
+  // Is A and B combined a forbidden region? If so, let A represent them both.
+  // Should only be called if completelyOverlaps can't merge regions (as combine makes assumptions based on this)
+  bool combine(FR *A, FR *B, int k) { // TODO: check if this actually ever combine something
+    int differentSizes = 0;
+    int differentDim = 0;
+    for (int d = 0; d < k; d++) {
+      if (not ((A->min[d] == B->min[d]) && (A->max[d] == B->max[d]))) {
+        differentSizes++; // Different in current dimension
+        differentDim = d; // Different in dimension d
+      }
+    }
+
+    if (differentSizes > 1) {
+      return false; // A and B differ in size in more than one dimension, cannot be merged
+    }
+
+    if ((A->min[differentDim] <= B->min[differentDim]) && (A->max[differentDim] >= B->min[differentDim])) {
+      // Change A inplace
+      A->max[differentDim] = B->max[differentDim]; // B->max must be larger than A->max before this!
+      return true;
+    } else if ((B->min[differentDim] <= A->min[differentDim]) && (B->max[differentDim] >= A->min[differentDim])) {
+      A->min[differentDim] = B->min[differentDim]; // B->min must be larger than A->min before this!
+      return true;
+    }
+    return false;
   }
 
   void genOutBoxesMerge(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
@@ -222,11 +249,15 @@ protected:
           if (recent.entries() == 2) { // Check if previous 2 FRs can be merged
             FR *A = recent.pop();
             FR *B = recent.pop();
-            int r = mergeTest(A, B, k);
+            int r = completelyOverlaps(A, B, k);
 
-            if (r == 0) { // no merge possible
-              F->insert(B);
-              recent.push(A);
+            if (r == 0) { // A and B don't overshadow eachother
+              if (combine(A, B, k)) {
+                recent.push(A); // B is merged into A
+              } else {
+                F->insert(B);
+                recent.push(A);
+              }
             } else if (r == 1) { // B is inside A
               recent.push(A);
             } else { // A is inside B
