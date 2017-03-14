@@ -130,32 +130,36 @@ protected:
     }
     return true;
   }
+  
+    // True if f and o overlap in dimension d
+  bool overlaps(int min, int max, Object *o, int d) {
+    if ((o->x[d].max() < min) || (o->x[d].min() > max)) {
+      return false;
+    }
+    return true;
+  }
 
   // Generates relative FRs to the object o and stores them in F
-  void genOutBoxes(Home home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  void genOutBoxes(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every object <> o
-        FR *f = static_cast<Space&>(home).alloc<FR>(1);
-        f->min = static_cast<Space&>(home).alloc<int>(dimensions);
-        f->max = static_cast<Space&>(home).alloc<int>(dimensions);
+        FR *f = (FR *) home.alloc<FR>(1);
+        f->min = home.alloc<int>(dimensions);
+        f->max = home.alloc<int>(dimensions);
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
           const int min = other->x[d].max() - o->l[d] + 1;
           const int max = other->x[d].min() + other->l[d] - 1;
-          if (min <= max) {
+          if ((min <= max) && overlaps(min, max, o, d)) {
             f->min[d] = min;
             f->max[d] = max;
           } else {
             exists = false;
             break; // Break loop, other is not interfering with o
           }
-        }
-
-        if (!overlaps(f, o, k)) { // do not add if o does not possibly overlap with f
-          exists = false;
         }
 
         // Only add forbidden region if it exists
@@ -233,17 +237,13 @@ protected:
         for (int d = 0; d < k; d++) { // For every dimension d
           const int min = other->x[d].max() - o->l[d] + 1;
           const int max = other->x[d].min() + other->l[d] - 1;
-          if (min <= max) {
+          if ((min <= max) && overlaps(min, max, o, d)) {
             f->min[d] = min;
             f->max[d] = max;
           } else {
             exists = false;
             break; // Break loop, other is not interfering with o
           }
-        }
-
-        if (!overlaps(f, o, k)) { // Do not add if o does not overlap with f
-          exists = false;
         }
 
         if (exists) {
