@@ -493,8 +493,11 @@ protected:
 
         for (int d = 0; d < k; d++) {
           ExecStatus pMinStatus = pruneMin(home, o->x, d, k, &F);
+          if (pMinStatus == ES_FAILED) {
+            return ES_FAILED;
+          } 
           ExecStatus pMaxStatus = pruneMax(home, o->x, d, k, &F);
-          if (pMinStatus == ES_FAILED || pMaxStatus == ES_FAILED) {
+          if (pMaxStatus == ES_FAILED) {
             return ES_FAILED;
           } else if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
             nonfix = true; // We pruned a bound, not at fixpoint
