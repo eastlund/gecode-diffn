@@ -374,6 +374,12 @@ protected:
         }
       }
 
+      // The hole could not be avoided (no larger values available)
+      if (!o[d].in(c[d])) {
+        std::cout << "KABLAM\n";
+        return ES_FAILED;
+      }
+
       ModEvent me = o[d].gq(home, c[d]); // prune o
       if (me_failed(me)) {
         return ES_FAILED;
@@ -450,6 +456,12 @@ protected:
           }
           prev = i.val();
         }
+      }
+
+      // The hole could not be avoided (no larger values available)
+      if (!o[d].in(c[d])) {
+        std::cout << "KABLAM\n";
+        return ES_FAILED;
       }
 
       ModEvent me = o[d].lq(home, c[d]); // prune o
