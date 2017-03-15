@@ -66,6 +66,7 @@ public:
   int size();
   void insert(FR*);
   FR* getRR();
+  void resetRR();
   ForbiddenRegions(Region*);
 };
 
@@ -74,6 +75,10 @@ ForbiddenRegions::ForbiddenRegions(Region *r) : collection(*r), length(0), RRpos
 
 FR* ForbiddenRegions::getRR() {
   return collection[(RRpos++ % length)];
+}
+
+void ForbiddenRegions::resetRR() {
+  RRpos = 0;
 }
 
 int ForbiddenRegions::size(void) {
@@ -376,7 +381,6 @@ protected:
 
       // The hole could not be avoided (no larger values available)
       if (!o[d].in(c[d])) {
-        std::cout << "KABLAM\n";
         return ES_FAILED;
       }
 
@@ -460,7 +464,6 @@ protected:
 
       // The hole could not be avoided (no larger values available)
       if (!o[d].in(c[d])) {
-        std::cout << "KABLAM\n";
         return ES_FAILED;
       }
 
@@ -479,13 +482,12 @@ protected:
 
   // R is a collection of rectangles participating in the problem
   ExecStatus filter(Space &home, int k) {
-    Region r(home); // TODO: maybe new region for each object?
-
     bool nonfix = true;
 
     while (nonfix) {
       nonfix = false;
       for (int i = 0; i < pivot; i++) {
+        Region r(home); // TODO: is region the best choice here?
         Object *o = Objects->collection[i];
         
         ForbiddenRegions F(&r); 
@@ -496,6 +498,7 @@ protected:
           if (pMinStatus == ES_FAILED) {
             return ES_FAILED;
           } 
+          F.resetRR(); // Reset RR position
           ExecStatus pMaxStatus = pruneMax(home, o->x, d, k, &F);
           if (pMaxStatus == ES_FAILED) {
             return ES_FAILED;
