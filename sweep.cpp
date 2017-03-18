@@ -46,6 +46,8 @@ public:
   ViewArray<IntView> x; // Object origins
   int *l; // Object lengths
   int id;
+  int **support_min;
+  int **support_max;
   
   bool isSame(Object *);
 
@@ -127,14 +129,14 @@ protected:
   int pivot;
   
   // Function for checking if o can possibly overlap f
-  bool overlaps(FR *f, Object *o, int k) {
-    for (int d = 0; d < k; d++) {
-      if ((o->x[d].max() < f->min[d]) || (o->x[d].min() > f->max[d])) {
-        return false;
-      }
-    }
-    return true;
-  }
+  // bool overlaps(FR *f, Object *o, int k) {
+  //   for (int d = 0; d < k; d++) {
+  //     if ((o->x[d].max() < f->min[d]) || (o->x[d].min() > f->max[d])) {
+  //       return false;
+  //     }
+  //   }
+  //   return true;
+  // }
   
     // True if f and o overlap in dimension d
   bool overlaps(int min, int max, Object *o, int d) {
@@ -153,6 +155,7 @@ protected:
         FR *f = (FR *) home.alloc<FR>(1);
         f->min = home.alloc<int>(dimensions);
         f->max = home.alloc<int>(dimensions);
+        //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util but seems to give worse performance
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
@@ -219,7 +222,7 @@ protected:
       A->max[differentDim] = B->max[differentDim]; // B->max must be larger than A->max before this!
       return true;
     } else if ((B->min[differentDim] <= A->min[differentDim]) && (B->max[differentDim] >= A->min[differentDim])) {
-      A->min[differentDim] = B->min[differentDim]; // B->min must be larger than A->min before this!
+      A->min[differentDim] = B->min[differentDim]; // B->min must be smaller than A->min before this!
       return true;
     }
     return false;
@@ -236,6 +239,7 @@ protected:
         FR *f = (FR *) home.alloc<FR>(1);
         f->min = home.alloc<int>(dimensions);
         f->max = home.alloc<int>(dimensions);
+        //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util
 
         bool exists = true; // Assume f exists
 
@@ -253,7 +257,7 @@ protected:
 
         if (exists) {
           if (inQueue == 2) { // Check if previous 2 FRs can be merged
-            int r = completelyOverlaps(fst, snd, k);
+            int r = completelyOverlaps(fst, snd, k); // TODO: this should be a switch-case
 
             if (r == 0) { // fst and snd don't completely overlap one another
               if (combine(fst, snd, k)) { // Can they be combined in another way?
@@ -316,22 +320,34 @@ protected:
   }
 
   // Function for pruning the lower bound of object o in dimension d
-  ExecStatus pruneMin(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
-    bool b = true;
-    
+  ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
+    bool supported = true;
+
+    for (int j = 0; j < k; j++) {
+      if (!o->x[j].in(o->support_min[d][j])) {
+        supported = false;
+        break;
+      }
+    }
+
+    if (supported && !getFR(k, o->support_min[d], F)) {
+      return ES_FIX;
+    }
+
+    bool b = true;    
     Region r(home); // Region for storage
 
     /* Init c and n*/
     int *c = r.alloc<int>(k); // sweep-point
     // init c
     for (int i = 0; i < k; i++) {
-      c[i] = o[i].min();
+      c[i] = o->x[i].min();
     }
 
     int *n = r.alloc<int>(k); // jump vector
     // init vector
     for (int i = 0; i < k; i++) {
-      n[i] = o[i].max() + 1;
+      n[i] = o->x[i].max() + 1;
     }
 
     // Get next FR
@@ -351,12 +367,12 @@ protected:
       for (int j = k - 1; j >= 0; j--) {
         int r = (j + d) % k;      // Consider rotation
         c[r] = n[r];              // Use n vector to jump
-        n[r] = o[r].max() + 1;    // Reset component of n after jumping
-        if (c[r] <= o[r].max()) { // Jump target found?
+        n[r] = o->x[r].max() + 1;    // Reset component of n after jumping
+        if (c[r] <= o->x[r].max()) { // Jump target found?
           b = true;               // target found
           break;
         } else {
-          c[r] = o[r].min();      // reset component of c, dimension r exhausted
+          c[r] = o->x[r].min();      // reset component of c, dimension r exhausted
         }
       }
       // Update currentF and check if it is infeasible still
@@ -364,30 +380,15 @@ protected:
     }
 
     if (b) { 
-      /* If the sweep point arrived at a hole in the domain
-       * adjust the sweep point in dimension d to next value in domain
-       */
-      // TODO: rerun pruning from that point since new point might be
-      // infeasible? Due to foxpoint loop it might be redundant
-      // however.
-      if (!o[d].in(c[d])) { // TODO: can this be done more efficiently?
-        for (IntVarValues i(o[d]); i(); ++i) {
-          if (i.val() > c[d]) {
-            c[d] = i.val();
-            break;
-          }
-        }
+      for (int j = 0; j < k; j++) {
+        o->support_min[d][j] = c[j];
       }
 
-      // The hole could not be avoided (no larger values available)
-      if (!o[d].in(c[d])) {
-        return ES_FAILED;
-      }
-
-      ModEvent me = o[d].gq(home, c[d]); // prune o
+      ModEvent me = o->x[d].gq(home, c[d]); // prune o
       if (me_failed(me)) {
         return ES_FAILED;
       } else if (me_modified(me)) {
+        o->support_min[d][d] = o->x[d].min(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -398,7 +399,19 @@ protected:
   }
 
   // Function for pruning the upper bound of object o in dimension d
-  ExecStatus pruneMax(Home home, ViewArray<IntView> o, int d, int k, ForbiddenRegions *F) {
+  ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
+    bool supported = true;
+    for (int j = 0; j < k; j++) {
+      if (!o->x[j].in(o->support_max[d][j])) {
+        supported = false;
+        break;
+      }
+    }
+
+    if (supported && !getFR(k, o->support_max[d], F)) {
+      return ES_FIX;
+    }
+
     bool b = true;
     Region r(home);
 
@@ -406,13 +419,13 @@ protected:
     int *c = r.alloc<int>(k); // sweep-point
     // init c
     for (int i = 0; i < k; i++) {
-      c[i] = o[i].max();
+      c[i] = o->x[i].max();
     }    
 
     int *n = r.alloc<int>(k); // jump-vector
     // initvector
     for (int i = 0; i < k; i++) {
-      n[i] = o[i].min() - 1;
+      n[i] = o->x[i].min() - 1;
     }
 
     // Get next FR
@@ -431,12 +444,12 @@ protected:
       for (int j = k - 1; j >= 0; j--) {
         int r = (j + d) % k;
         c[r] = n[r];              // Use n vector to jump
-        n[r] = o[r].min() - 1;    // Reset component of n after jumping
-        if (c[r] >= o[r].min()) { // Jump target found?
+        n[r] = o->x[r].min() - 1;    // Reset component of n after jumping
+        if (c[r] >= o->x[r].min()) { // Jump target found?
           b = true;               // target found
           break;
         } else {
-          c[r] = o[r].max();      // reset component of c, dimension r exhausted
+          c[r] = o->x[r].max();      // reset component of c, dimension r exhausted
         }
       }
 
@@ -445,32 +458,15 @@ protected:
     }
 
     if (b) { 
-      /* If the sweep point arrived at a hole in the domain
-       * adjust the sweep point in dimension d to next value in domain
-       */
-      // TODO: rerun pruning from that point since new point might be
-      // infeasible? Due to foxpoint loop it might be redundant
-      // however.
-      if (!o[d].in(c[d])) { 
-        int prev = o[d].min() - 1;
-        for (IntVarValues i(o[d]); i(); ++i) {
-          if (i.val() >= c[d]) {
-            c[d] = prev;
-            break;
-          }
-          prev = i.val();
-        }
+      for (int j = 0; j < k; j++) {
+        o->support_max[d][j] = c[j];
       }
 
-      // The hole could not be avoided (no larger values available)
-      if (!o[d].in(c[d])) {
-        return ES_FAILED;
-      }
-
-      ModEvent me = o[d].lq(home, c[d]); // prune o
+      ModEvent me = o->x[d].lq(home, c[d]); // prune o
       if (me_failed(me)) {
         return ES_FAILED;
       } else if (me_modified(me)) {
+        o->support_max[d][d] = o->x[d].max(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -494,12 +490,12 @@ protected:
         genOutBoxesMerge(home, &F, Objects, k, o);
 
         for (int d = 0; d < k; d++) {
-          ExecStatus pMinStatus = pruneMin(home, o->x, d, k, &F);
+          ExecStatus pMinStatus = pruneMin(home, o, d, k, &F);
           if (pMinStatus == ES_FAILED) {
             return ES_FAILED;
           } 
           F.resetRR(); // Reset RR position
-          ExecStatus pMaxStatus = pruneMax(home, o->x, d, k, &F);
+          ExecStatus pMaxStatus = pruneMax(home, o, d, k, &F);
           if (pMaxStatus == ES_FAILED) {
             return ES_FAILED;
           } else if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
@@ -543,6 +539,9 @@ public:
     for (int i = 0; i < x0.size(); i++) {
       Object *o = ((Space&) home).alloc<Object>(1);
       o->l = ((Space&) home).alloc<int>(2);
+      o->support_min = ((Space&) home).alloc<int*>(2);
+      o->support_max = ((Space&) home).alloc<int*>(2);
+      o->l = ((Space&) home).alloc<int>(2);
       o->x = ViewArray<IntView>((Space&) home, 2);
 
       o->x[0] = x0[i];
@@ -550,6 +549,24 @@ public:
       o->l[0] = w0[i];
       o->l[1] = h0[i];
       o->id = i;
+
+      o->support_min[0] = ((Space&) home).alloc<int>(2);
+      o->support_min[1] = ((Space&) home).alloc<int>(2);
+      //o->support_min[1] = ((Space&) home).realloc<int>(o->support_min[0], 2, 2*2); // TODO: this doesn't seem worth it performance wise
+      o->support_min[0][0] = o->x[0].min();
+      o->support_min[0][1] = o->x[1].min();
+
+      o->support_min[1][0] = o->x[0].min();
+      o->support_min[1][1] = o->x[1].min();
+
+      o->support_max[0] = ((Space&) home).alloc<int>(2);
+      o->support_max[1] = ((Space&) home).alloc<int>(2);
+      //o->support_max[1] = ((Space&) home).realloc<int>(o->support_max[0], 2, 2*2);
+      o->support_max[0][0] = o->x[0].max();
+      o->support_max[0][1] = o->x[1].max();
+
+      o->support_max[1][0] = o->x[0].max();
+      o->support_max[1][1] = o->x[1].max();
 
       o->x.subscribe(home,*this,PC_INT_DOM);
 
@@ -587,6 +604,8 @@ public:
     dimensions = p.dimensions;
     pivot = p.pivot;
 
+    
+
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home);
 
@@ -594,9 +613,17 @@ public:
       Object *pObj = p.Objects->collection[i];
       Object *o = ((Space&) home).alloc<Object>(1);
       o->l = home.alloc<int>(dimensions);
+      o->support_min = home.alloc<int*>(dimensions);
+      o->support_max = home.alloc<int*>(dimensions);
       o->x.update(home, share, pObj->x);
       for (int j = 0; j < dimensions; j++) {
         o->l[j] = pObj->l[j];
+        o->support_min[j] = home.alloc<int>(dimensions);
+        o->support_max[j] = home.alloc<int>(dimensions);
+        for (int d = 0; d < dimensions; d++) {
+          o->support_min[j][d] = pObj->support_min[j][d];
+          o->support_max[j][d] = pObj->support_max[j][d];
+        }
       }
       o->id = pObj->id;
       Objects->insert(o);
