@@ -46,8 +46,8 @@ public:
   ViewArray<IntView> x; // Object origins
   int *l; // Object lengths
   int id;
-  int **support_min;
-  int **support_max;
+  int **support_min; // Arrays keeping track of supported points for pruneMin
+  int **support_max; // Arrays keeping track of supported points for pruneMax
   
   bool isSame(Object *);
 
