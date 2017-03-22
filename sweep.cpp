@@ -541,7 +541,6 @@ public:
       o->l = ((Space&) home).alloc<int>(2);
       o->support_min = ((Space&) home).alloc<int*>(2);
       o->support_max = ((Space&) home).alloc<int*>(2);
-      o->l = ((Space&) home).alloc<int>(2);
       o->x = ViewArray<IntView>((Space&) home, 2);
 
       o->x[0] = x0[i];
