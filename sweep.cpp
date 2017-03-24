@@ -153,8 +153,8 @@ protected:
 
       if (!other->isSame(o)) { // For every object <> o
         FR *f = (FR *) home.alloc<FR>(1);
-        f->min = home.alloc<int>(dimensions);
-        f->max = home.alloc<int>(dimensions);
+        f->min = home.alloc<int>(k);
+        f->max = home.alloc<int>(k);
         //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util but seems to give worse performance
         bool exists = true; // Assume f exists
 
@@ -237,8 +237,8 @@ protected:
 
       if (!other->isSame(o)) { // For every other object <> o
         FR *f = (FR *) home.alloc<FR>(1);
-        f->min = home.alloc<int>(dimensions);
-        f->max = home.alloc<int>(dimensions);
+        f->min = home.alloc<int>(k);
+        f->max = home.alloc<int>(k);
         //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util
 
         bool exists = true; // Assume f exists
