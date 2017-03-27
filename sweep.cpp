@@ -48,6 +48,11 @@ public:
   int id;
   int **support_min; // Arrays keeping track of supported points for pruneMin
   int **support_max; // Arrays keeping track of supported points for pruneMax
+
+  int *rfrb;
+  int *rfre;
+
+  int *d_size;
   
   bool isSame(Object *);
 
@@ -127,18 +132,29 @@ protected:
   int dimensions; // Number of dimensions of the problem
 
   int pivot;
+
+  int *maxl;
+
+  class ViewAdvisor : public Advisor {
+  public:
+    //Int::IntView x;
+    int dim; // What dimension in the corresponding viewarray is this advisor responsible for?
+    int i; // The corresponding object
+    ViewAdvisor(Space& home, Propagator& p, 
+                Council<ViewAdvisor>& c, int d, int idx) 
+      : Advisor(home,p,c), dim(d), i(idx) {
+    }
+    ViewAdvisor(Space& home, bool share, ViewAdvisor& a)
+      : Advisor(home,share,a), dim(a.dim), i(a.i) {
+    }
+    void dispose(Space& home, Council<ViewAdvisor>& c) {
+      Advisor::dispose(home,c);
+    }
+  };
   
-  // Function for checking if o can possibly overlap f
-  // bool overlaps(FR *f, Object *o, int k) {
-  //   for (int d = 0; d < k; d++) {
-  //     if ((o->x[d].max() < f->min[d]) || (o->x[d].min() > f->max[d])) {
-  //       return false;
-  //     }
-  //   }
-  //   return true;
-  // }
+  Council<ViewAdvisor> c;
   
-    // True if f and o overlap in dimension d
+  // True if f and o overlap in dimension d
   bool overlaps(int min, int max, Object *o, int d) {
     if ((o->x[d].max() < min) || (o->x[d].min() > max)) {
       return false;
@@ -228,12 +244,27 @@ protected:
     return false;
   }
 
+  bool canSkip(Object *o, int k) {
+    for (int i = 0; i < k; i++) {
+      if (o->d_size[i] > (maxl[i] - 2)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void genOutBoxesMerge(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     int inQueue = 0;
     FR *fst = NULL;
     FR *snd = NULL;
+    //std::cout << "--------------------------\n";
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
+      
+      if (canSkip(other, k)) {
+        //std::cout << "Skipping " << other->id << "\n";
+        continue;
+      }
 
       if (!other->isSame(o)) { // For every other object <> o
         FR *f = (FR *) home.alloc<FR>(1);
@@ -244,8 +275,8 @@ protected:
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
-          const int min = other->x[d].max() - o->l[d] + 1;
-          const int max = other->x[d].min() + other->l[d] - 1;
+          const int min = other->rfrb[d] - o->l[d];//other->x[d].max() - o->l[d] + 1;
+          const int max = other->rfre[d];//other->x[d].min() + other->l[d] - 1;
           if ((min <= max) && overlaps(min, max, o, d)) {
             f->min[d] = min;
             f->max[d] = max;
@@ -389,6 +420,8 @@ protected:
         return ES_FAILED;
       } else if (me_modified(me)) {
         o->support_min[d][d] = o->x[d].min(); // In case c[d] was in a hole
+        o->rfre[d] = o->x[d].min() + o->l[d] - 1;
+        o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -430,7 +463,6 @@ protected:
 
     // Get next FR
     FR *currentF = getFR(k, c, F);
-    //bool infeasible = (currentF != NULL);
 
     // While we have not failed and c is infeasible
     while (b and currentF) {
@@ -467,6 +499,8 @@ protected:
         return ES_FAILED;
       } else if (me_modified(me)) {
         o->support_max[d][d] = o->x[d].max(); // In case c[d] was in a hole
+        o->rfrb[d] = o->x[d].max() + 1;
+        o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -479,13 +513,14 @@ protected:
   // R is a collection of rectangles participating in the problem
   ExecStatus filter(Space &home, int k) {
     bool nonfix = true;
+    bool allfixed = true;
 
     while (nonfix) {
       nonfix = false;
-      for (int i = 0; i < pivot; i++) {
+      allfixed = true;
+      for (int i = 0; i < Objects->size(); i++) { // TODO: re-add SEPERATE
         Region r(home); // TODO: is region the best choice here?
         Object *o = Objects->collection[i];
-        
         ForbiddenRegions F(&r); 
         genOutBoxesMerge(home, &F, Objects, k, o);
 
@@ -502,22 +537,14 @@ protected:
             nonfix = true; // We pruned a bound, not at fixpoint
           }
         }
+
+        if (!o->x.assigned()) {
+          allfixed = false;
+        }
       }
     }
 
-    // Check if any objects have become fixed
-    for (int i = 0; i < pivot; i++) { // This pivot solution seems a bit slower compared to using fixed boolean attribute per object
-        Object *o = Objects->collection[i];
-        if (o->x.assigned()) {
-          Objects->collection[i] = Objects->collection[pivot-1];
-          Objects->collection[pivot-1] = o;
-          --pivot; // Move pivot point to the left (we have one more fixed object)
-          --i; // Need to check this position again, as it now contains other object
-        }
-    }
-
-    if (pivot == 0) {
-      //Objects->prettyPrint();
+    if (allfixed) {
       return home.ES_SUBSUMED(*this);
     }
 
@@ -530,10 +557,14 @@ public:
   NonOverlapping(Home home, // Constructor for 2D
                  ViewArray<IntView>& x0,int w0[],
                  ViewArray<IntView>& y0,int h0[])
-    : Propagator(home)
+    : Propagator(home), c(home)
   {
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home);
+
+    maxl = ((Space&) home).alloc<int>(2);
+    maxl[0] = -1;
+    maxl[1] = -1;
 
     // Create corresponding objects for the ViewArrays and arrays
     for (int i = 0; i < x0.size(); i++) {
@@ -548,6 +579,9 @@ public:
       o->l[0] = w0[i];
       o->l[1] = h0[i];
       o->id = i;
+
+      maxl[0] = std::max(maxl[0], o->l[0]);
+      maxl[1] = std::max(maxl[0], o->l[1]);
 
       o->support_min[0] = ((Space&) home).alloc<int>(2);
       o->support_min[1] = ((Space&) home).alloc<int>(2);
@@ -567,13 +601,29 @@ public:
       o->support_max[1][0] = o->x[0].max();
       o->support_max[1][1] = o->x[1].max();
 
-      o->x.subscribe(home,*this,PC_INT_DOM);
+      o->rfre = ((Space&) home).alloc<int>(2);
+      o->rfrb = ((Space&) home).alloc<int>(2);
+
+      o->rfrb[0] = o->x[0].max() + 1;
+      o->rfre[0] = o->x[0].min() + o->l[0] - 1;
+      o->rfrb[1] = o->x[1].max() + 1;
+      o->rfre[1] = o->x[1].min() + o->l[1] - 1;
+
+      o->d_size = ((Space&) home).alloc<int>(2);
+
+      o->d_size[0] = o->x[0].max() - o->x[0].min() - o->l[0];
+      o->d_size[1] = o->x[1].max() - o->x[1].min() - o->l[1];
+
+      o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i));
+      o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i));
 
       Objects->insert(o);
     }
 
     dimensions = 2;
-    pivot = Objects->size(); // All objects left of pivot are non-fixed
+
+    Int::IntView::schedule(home, *this, Int::ME_INT_DOM);
+    home.notice(*this, AP_DISPOSE);
   }
 
   // Post no-overlap propagator
@@ -588,10 +638,8 @@ public:
 
   // Dispose propagator and return its size
   virtual size_t dispose(Space& home) {
-    for (int i = 0; i < Objects->size(); i++) { 
-      Objects->collection[i]->x.cancel(home, *this, PC_INT_DOM);
-    }
-    //home.ignore(* this,AP_DISPOSE);
+    home.ignore(*this, AP_DISPOSE);
+    c.dispose(home);
 
     (void) Propagator::dispose(home);
     return sizeof(*this);
@@ -602,11 +650,14 @@ public:
     : Propagator(home,share,p) {
     dimensions = p.dimensions;
     pivot = p.pivot;
-
-    
-
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home);
+
+    maxl = ((Space&) home).alloc<int>(2);
+    
+    for (int j = 0; j < dimensions; j++) {
+      maxl[j] = p.maxl[j];
+    }
 
     for (int i = 0; i < p.Objects->size(); i++) {
       Object *pObj = p.Objects->collection[i];
@@ -614,6 +665,12 @@ public:
       o->l = home.alloc<int>(dimensions);
       o->support_min = home.alloc<int*>(dimensions);
       o->support_max = home.alloc<int*>(dimensions);
+
+      o->rfre = home.alloc<int>(dimensions);
+      o->rfrb = home.alloc<int>(dimensions);
+
+      o->d_size = home.alloc<int>(dimensions);
+
       o->x.update(home, share, pObj->x);
       for (int j = 0; j < dimensions; j++) {
         o->l[j] = pObj->l[j];
@@ -623,11 +680,17 @@ public:
           o->support_min[j][d] = pObj->support_min[j][d];
           o->support_max[j][d] = pObj->support_max[j][d];
         }
+        
+        o->rfre[j] = pObj->rfre[j];
+        o->rfrb[j] = pObj->rfrb[j];
+
+        o->d_size[j] = pObj->d_size[j];
       }
       o->id = pObj->id;
       Objects->insert(o);
     }
 
+    c.update(home, share, p.c);
   }
   // Create copy during cloning
   virtual Propagator* copy(Space& home, bool share) {
@@ -641,25 +704,25 @@ public:
 
   // TODO: why do we need this?
   virtual void reschedule(Space& home) {
-    for (int i = 0; i < Objects->size(); i++) {
-      Objects->collection[i]->x.reschedule(home,*this,Int::PC_INT_DOM);
-    }
+    Int::IntView::schedule(home, *this, Int::ME_INT_DOM);
+  }
+
+  virtual ExecStatus advise(Space& home, Advisor& a, const Delta& d) {
+    int dim = (static_cast<ViewAdvisor&>(a)).dim;
+    int i = (static_cast<ViewAdvisor&>(a)).i;
+    Object *o = Objects->collection[i];
+
+    // update values since view changed
+    o->rfrb[dim] = o->x[dim].max() + 1; 
+    o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
+    o->d_size[dim] = o->x[dim].max() - o->x[dim].min() - o->l[dim];
+
+    return ES_NOFIX;
   }
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
     return filter((Home) home, 2);
-    // ExecStatus fStatus = filter((Home) home, 2);// ? ES_FIX : ES_FAILED;
-
-    // if (fStatus == ES_FAILED) {
-    //   return ES_FAILED;
-    // }
-
-    // if (fStatus != ES_FIX) {
-    //   return home.ES_SUBSUMED(*this);
-    // } else {
-    //   return fStatus;
-    // }
   }
  
 };
