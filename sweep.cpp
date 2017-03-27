@@ -524,17 +524,36 @@ protected:
         ForbiddenRegions F(&r); 
         genOutBoxesMerge(r, &F, Objects, k, o);
 
-        for (int d = 0; d < k; d++) {
-          ExecStatus pMinStatus = pruneMin(home, o, d, k, &F);
-          if (pMinStatus == ES_FAILED) {
+        if (o->x.assigned()) {
+          int c[k];
+          for (int i = 0; i < k; i++) {
+            c[i] = o->x[i].val();
+          }
+          if (getFR(k, c, &F)) {
             return ES_FAILED;
-          } 
-          F.resetRR(); // Reset RR position
-          ExecStatus pMaxStatus = pruneMax(home, o, d, k, &F);
-          if (pMaxStatus == ES_FAILED) {
-            return ES_FAILED;
-          } else if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
-            nonfix = true; // We pruned a bound, not at fixpoint
+          } else {
+            F.resetRR();
+          }
+        } else {
+          for (int d = 0; d < k; d++) {
+            ExecStatus pMinStatus = ES_FIX;
+            if (!o->x[d].assigned()) {
+              pMinStatus = pruneMin(home, o, d, k, &F);
+              if (pMinStatus == ES_FAILED) {
+                return ES_FAILED;
+              }
+            }
+            F.resetRR(); // Reset RR position
+            ExecStatus pMaxStatus = ES_FIX;
+            if (!o->x[d].assigned()) {
+              pMaxStatus = pruneMax(home, o, d, k, &F);
+              if (pMaxStatus == ES_FAILED) {
+                return ES_FAILED;
+              }
+            }
+            if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
+              nonfix = true; // We pruned a bound, not at fixpoint
+            }
           }
         }
 
