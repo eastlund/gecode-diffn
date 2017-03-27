@@ -163,14 +163,14 @@ protected:
   }
 
   // Generates relative FRs to the object o and stores them in F
-  void genOutBoxes(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  void genOutBoxes(Region &r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every object <> o
-        FR *f = (FR *) home.alloc<FR>(1);
-        f->min = home.alloc<int>(k);
-        f->max = home.alloc<int>(k);
+        FR *f = (FR *) r.alloc<FR>(1);
+        f->min = r.alloc<int>(k);
+        f->max = r.alloc<int>(k);
         //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util but seems to give worse performance
         bool exists = true; // Assume f exists
 
@@ -253,7 +253,7 @@ protected:
     return false;
   }
 
-  void genOutBoxesMerge(Space &home, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  void genOutBoxesMerge(Region& r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     int inQueue = 0;
     FR *fst = NULL;
     FR *snd = NULL;
@@ -267,9 +267,9 @@ protected:
       }
 
       if (!other->isSame(o)) { // For every other object <> o
-        FR *f = (FR *) home.alloc<FR>(1);
-        f->min = home.alloc<int>(k);
-        f->max = home.alloc<int>(k);
+        FR *f = (FR *) r.alloc<FR>(1);
+        f->min = r.alloc<int>(k);
+        f->max = r.alloc<int>(k);
         //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util
 
         bool exists = true; // Assume f exists
@@ -519,10 +519,10 @@ protected:
       nonfix = false;
       allfixed = true;
       for (int i = 0; i < Objects->size(); i++) { // TODO: re-add SEPERATE
-        Region r(home); // TODO: is region the best choice here?
+        Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
         Object *o = Objects->collection[i];
         ForbiddenRegions F(&r); 
-        genOutBoxesMerge(home, &F, Objects, k, o);
+        genOutBoxesMerge(r, &F, Objects, k, o);
 
         for (int d = 0; d < k; d++) {
           ExecStatus pMinStatus = pruneMin(home, o, d, k, &F);
