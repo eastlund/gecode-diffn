@@ -53,6 +53,7 @@ public:
   int *rfre;
 
   int *d_size;
+  bool fixed;
   
   bool isSame(Object *);
 };
@@ -217,7 +218,7 @@ protected:
       if (f0->max[d] + 1 < f1->min[d] || f0->min[d] > f1->max[d] + 1) { /* Do not coalesce */
         return 0;
       } else if (f0->min[d] == f1->min[d] && f0->max[d] == f1->max[d]) { /* Equal in dimension d */
-        // TODO: think here
+        // no-op
       } else if (f0->min[d] <= f1->min[d] && f0->max[d] >= f1->max[d]) { /* f1 \subset f0*/
         if (trend == 0 || trend == 1) {
           trend = 1;
@@ -499,9 +500,15 @@ ExecStatus filter(Space &home, int k) {
   while (nonfix) {
     nonfix = false;
     allfixed = true;
-    for (int i = 0; i < Objects->size(); i++) { // TODO: re-add SEPERATE
-      Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
+    for (int i = 0; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
+
+      // SEPARATE: if o is fixed and checked, then skip it.
+      if (o->fixed) {
+        continue; 
+      }
+
+      Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
       ForbiddenRegions F(&r); 
       genOutBoxesMerge(r, &F, Objects, k, o);
 
@@ -540,6 +547,8 @@ ExecStatus filter(Space &home, int k) {
 
       if (!o->x.assigned()) {
         allfixed = false;
+      } else {
+        o->fixed = true;
       }
     }
   }
@@ -547,7 +556,6 @@ ExecStatus filter(Space &home, int k) {
   if (allfixed) {
     return home.ES_SUBSUMED(*this);
   }
-
 
   return ES_FIX;
 }
@@ -569,6 +577,8 @@ NonOverlapping(Home home, // Constructor for 2D
   // Create corresponding objects for the ViewArrays and arrays
   for (int i = 0; i < x0.size(); i++) {
     Object *o = ((Space&) home).alloc<Object>(1);
+    o->fixed = false;
+
     o->l = ((Space&) home).alloc<int>(2);
     o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
     o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);//((Space&) home).alloc<int*>(2);
@@ -593,8 +603,8 @@ NonOverlapping(Home home, // Constructor for 2D
     o->support_max[2] = o->x[0].max();
     o->support_max[3] = o->x[1].max();
 
-    o->rfre = ((Space&) home).alloc<int>(2);
-    o->rfrb = ((Space&) home).alloc<int>(2);
+    o->rfre = ((Space&) home).alloc<int>(2*2);
+    o->rfrb = &(o->rfre[2]);
 
     o->rfrb[0] = o->x[0].max() + 1;
     o->rfre[0] = o->x[0].min() + o->l[0] - 1;
@@ -654,14 +664,15 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
   for (int i = 0; i < p.Objects->size(); i++) {
     Object *pObj = p.Objects->collection[i];
     Object *o = ((Space&) home).alloc<Object>(1);
-    o->l = home.alloc<int>(dimensions);
+    o->fixed = pObj->fixed;
+
     o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // TODO: might want to place min and max in same block?
     o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
 
-    o->rfre = home.alloc<int>(dimensions*2);
+    o->l = home.alloc<int>(dimensions*4);
+    o->rfre = &(o->l[dimensions]);
     o->rfrb = &(o->rfre[dimensions]);
-
-    o->d_size = home.alloc<int>(dimensions);
+    o->d_size = &(o->rfrb[dimensions]);
 
     o->x.update(home, share, pObj->x);
     for (int j = 0; j < dimensions; j++) {
@@ -693,7 +704,6 @@ virtual PropCost cost(const Space&, const ModEventDelta&) const {
   return PropCost::quadratic(PropCost::HI,dimensions*Objects->size());
 }
 
-// TODO: why do we need this?
 virtual void reschedule(Space& home) {
   Int::IntView::schedule(home, *this, Int::ME_INT_DOM);
 }
