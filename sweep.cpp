@@ -46,8 +46,8 @@ public:
   ViewArray<IntView> x; // Object origins
   int *l; // Object lengths
   int id;
-  int **support_min; // Arrays keeping track of supported points for pruneMin
-  int **support_max; // Arrays keeping track of supported points for pruneMax
+  int *support_min; // 1D matrix representation for keeping track of supported points for pruneMin
+  int *support_max; // 1D matrix representation for keeping track of supported points for pruneMax
 
   int *rfrb;
   int *rfre;
@@ -55,8 +55,6 @@ public:
   int *d_size;
   
   bool isSame(Object *);
-
-  //Object() : fixed(false) {}
 };
 
 bool Object::isSame(Object *o) {
@@ -338,13 +336,14 @@ ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
   bool supported = true;
 
   for (int j = 0; j < k; j++) {
-    if (!o->x[j].in(o->support_min[d][j])) {
+    if (!o->x[j].in(o->support_min[d*k+j])) {
       supported = false;
       break;
     }
   }
 
-  if (supported && !getFR(k, o->support_min[d], F)) {
+  // Considering the d:th row in the support_min "matrix"
+  if (supported && !getFR(k, &(o->support_min[d*k]), F)) {
     return ES_FIX;
   }
 
@@ -395,14 +394,14 @@ ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
 
   if (b) { 
     for (int j = 0; j < k; j++) {
-      o->support_min[d][j] = c[j];
+      o->support_min[d*k+j] = c[j];
     }
 
     ModEvent me = o->x[d].gq(home, c[d]); // prune o
     if (me_failed(me)) {
       return ES_FAILED;
     } else if (me_modified(me)) {
-      o->support_min[d][d] = o->x[d].min(); // In case c[d] was in a hole
+      o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
       o->rfre[d] = o->x[d].min() + o->l[d] - 1;
       o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
       return ES_NOFIX;
@@ -418,13 +417,14 @@ ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
 ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
   bool supported = true;
   for (int j = 0; j < k; j++) {
-    if (!o->x[j].in(o->support_max[d][j])) {
+    if (!o->x[j].in(o->support_max[d*k+j])) {
       supported = false;
       break;
     }
   }
 
-  if (supported && !getFR(k, o->support_max[d], F)) {
+  // Considering the d:th row in the support_max "matrix"
+  if (supported && !getFR(k, &(o->support_max[d*k]), F)) {
     return ES_FIX;
   }
 
@@ -474,14 +474,14 @@ ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
 
   if (b) { 
     for (int j = 0; j < k; j++) {
-      o->support_max[d][j] = c[j];
+      o->support_max[d*k+j] = c[j];
     }
 
     ModEvent me = o->x[d].lq(home, c[d]); // prune o
     if (me_failed(me)) {
       return ES_FAILED;
     } else if (me_modified(me)) {
-      o->support_max[d][d] = o->x[d].max(); // In case c[d] was in a hole
+      o->support_max[d*k+d] = o->x[d].max(); // In case c[d] was in a hole
       o->rfrb[d] = o->x[d].max() + 1;
       o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
       return ES_NOFIX;
@@ -572,8 +572,8 @@ NonOverlapping(Home home, // Constructor for 2D
   for (int i = 0; i < x0.size(); i++) {
     Object *o = ((Space&) home).alloc<Object>(1);
     o->l = ((Space&) home).alloc<int>(2);
-    o->support_min = ((Space&) home).alloc<int*>(2);
-    o->support_max = ((Space&) home).alloc<int*>(2);
+    o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
+    o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);//((Space&) home).alloc<int*>(2);
     o->x = ViewArray<IntView>((Space&) home, 2);
 
     o->x[0] = x0[i];
@@ -585,23 +585,15 @@ NonOverlapping(Home home, // Constructor for 2D
     maxl[0] = std::max(maxl[0], o->l[0]);
     maxl[1] = std::max(maxl[0], o->l[1]);
 
-    o->support_min[0] = ((Space&) home).alloc<int>(2);
-    o->support_min[1] = ((Space&) home).alloc<int>(2);
-    //o->support_min[1] = ((Space&) home).realloc<int>(o->support_min[0], 2, 2*2); // TODO: this doesn't seem worth it performance wise
-    o->support_min[0][0] = o->x[0].min();
-    o->support_min[0][1] = o->x[1].min();
+    o->support_min[0] = o->x[0].min();
+    o->support_min[1] = o->x[1].min();
+    o->support_min[2] = o->x[0].min();
+    o->support_min[3] = o->x[1].min();
 
-    o->support_min[1][0] = o->x[0].min();
-    o->support_min[1][1] = o->x[1].min();
-
-    o->support_max[0] = ((Space&) home).alloc<int>(2);
-    o->support_max[1] = ((Space&) home).alloc<int>(2);
-    //o->support_max[1] = ((Space&) home).realloc<int>(o->support_max[0], 2, 2*2);
-    o->support_max[0][0] = o->x[0].max();
-    o->support_max[0][1] = o->x[1].max();
-
-    o->support_max[1][0] = o->x[0].max();
-    o->support_max[1][1] = o->x[1].max();
+    o->support_max[0] = o->x[0].max();
+    o->support_max[1] = o->x[1].max();
+    o->support_max[2] = o->x[0].max();
+    o->support_max[3] = o->x[1].max();
 
     o->rfre = ((Space&) home).alloc<int>(2);
     o->rfrb = ((Space&) home).alloc<int>(2);
@@ -665,8 +657,8 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
     Object *pObj = p.Objects->collection[i];
     Object *o = ((Space&) home).alloc<Object>(1);
     o->l = home.alloc<int>(dimensions);
-    o->support_min = home.alloc<int*>(dimensions);
-    o->support_max = home.alloc<int*>(dimensions);
+    o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
+    o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
 
     o->rfre = home.alloc<int>(dimensions);
     o->rfrb = home.alloc<int>(dimensions);
@@ -676,11 +668,10 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
     o->x.update(home, share, pObj->x);
     for (int j = 0; j < dimensions; j++) {
       o->l[j] = pObj->l[j];
-      o->support_min[j] = home.alloc<int>(dimensions);
-      o->support_max[j] = home.alloc<int>(dimensions);
+
       for (int d = 0; d < dimensions; d++) {
-        o->support_min[j][d] = pObj->support_min[j][d];
-        o->support_max[j][d] = pObj->support_max[j][d];
+        o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
+        o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
       }
         
       o->rfre[j] = pObj->rfre[j];
