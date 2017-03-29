@@ -167,9 +167,8 @@ protected:
 
       if (!other->isSame(o)) { // For every object <> o
         FR *f = (FR *) r.alloc<FR>(1);
-        f->min = r.alloc<int>(k);
-        f->max = r.alloc<int>(k);
-        //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util but seems to give worse performance
+        f->min = r.alloc<int>(k*2);
+        f->max = &(f->min[k]);
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
@@ -267,9 +266,8 @@ protected:
         }
 
         FR *f = (FR *) r.alloc<FR>(1);
-        f->min = r.alloc<int>(k);
-        f->max = r.alloc<int>(k);
-        //f->max = home.realloc<int>(f->min, dimensions, dimensions*2); // This could give better cache util
+        f->min = r.alloc<int>(k*2);
+        f->max = &(f->min[k]);
 
         bool exists = true; // Assume f exists
 
@@ -657,11 +655,11 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
     Object *pObj = p.Objects->collection[i];
     Object *o = ((Space&) home).alloc<Object>(1);
     o->l = home.alloc<int>(dimensions);
-    o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
+    o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // TODO: might want to place min and max in same block?
     o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
 
-    o->rfre = home.alloc<int>(dimensions);
-    o->rfrb = home.alloc<int>(dimensions);
+    o->rfre = home.alloc<int>(dimensions*2);
+    o->rfrb = &(o->rfre[dimensions]);
 
     o->d_size = home.alloc<int>(dimensions);
 
