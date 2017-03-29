@@ -645,7 +645,7 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
   Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
   new(Objects) OBJECTS((Space &) home);
 
-  maxl = ((Space&) home).alloc<int>(2);
+  maxl = ((Space&) home).alloc<int>(dimensions);
     
   for (int j = 0; j < dimensions; j++) {
     maxl[j] = p.maxl[j];
