@@ -48,11 +48,13 @@ public:
   int id;
   int *support_min; // 1D matrix representation for keeping track of supported points for pruneMin
   int *support_max; // 1D matrix representation for keeping track of supported points for pruneMax
-
+  
+  // Arrays used in ADVISOR optimisation
   int *rfrb;
   int *rfre;
-
   int *d_size;
+
+  // Boolean used in SEPARATE optimisation
   bool fixed;
   
   bool isSame(Object *);
@@ -129,8 +131,6 @@ class NonOverlapping : public Propagator {
 protected:
   OBJECTS *Objects; // Objects being filtered
   int dimensions; // Number of dimensions of the problem
-
-  int pivot;
 
   int *maxl;
 
@@ -651,7 +651,6 @@ virtual size_t dispose(Space& home) {
 NonOverlapping(Space& home, bool share, NonOverlapping& p)
   : Propagator(home,share,p) {
   dimensions = p.dimensions;
-  pivot = p.pivot;
   Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
   new(Objects) OBJECTS((Space &) home);
 
