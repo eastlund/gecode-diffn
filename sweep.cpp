@@ -377,11 +377,11 @@ ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
     // TODO: Abstract to adjust procedure
     // Adjust the sweep-point based on jump vector information
     for (int j = k - 1; j >= 0; j--) {
-      int r = (j + d) % k;      // Consider rotation
-      c[r] = n[r];              // Use n vector to jump
+      int r = (j + d) % k;         // Consider rotation
+      c[r] = n[r];                 // Use n vector to jump
       n[r] = o->x[r].max() + 1;    // Reset component of n after jumping
       if (c[r] <= o->x[r].max()) { // Jump target found?
-        b = true;               // target found
+        b = true;                  // target found
         break;
       } else {
         c[r] = o->x[r].min();      // reset component of c, dimension r exhausted
@@ -527,7 +527,7 @@ ExecStatus filter(Space &home, int k) {
           ExecStatus pMinStatus = ES_FIX;
           if (!o->x[d].assigned()) {
             pMinStatus = pruneMin(home, o, d, k, &F);
-            if (pMinStatus == ES_FAILED) {
+            if (pMinStatus == ES_FAILED) { // No feasible minimal point found, report failure
               return ES_FAILED;
             }
           }
@@ -535,12 +535,12 @@ ExecStatus filter(Space &home, int k) {
           ExecStatus pMaxStatus = ES_FIX;
           if (!o->x[d].assigned()) {
             pMaxStatus = pruneMax(home, o, d, k, &F);
-            if (pMaxStatus == ES_FAILED) {
+            if (pMaxStatus == ES_FAILED) { // No feasible maximal point found, report failure
               return ES_FAILED;
             }
           }
-          if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) {
-            nonfix = true; // We pruned a bound, not at fixpoint
+          if (pMinStatus == ES_NOFIX || pMaxStatus == ES_NOFIX) { // We pruned a bound, not at fixpoint
+            nonfix = true;
           }
         }
       }
@@ -553,11 +553,12 @@ ExecStatus filter(Space &home, int k) {
     }
   }
 
+  // If all objects are fixed and we have not failed, we can subsume
   if (allfixed) {
     return home.ES_SUBSUMED(*this);
   }
 
-  return ES_FIX;
+  return ES_FIX; // Filter is a fixpoint loop, thus report at fixpoint
 }
 
 public:
@@ -581,7 +582,7 @@ NonOverlapping(Home home, // Constructor for 2D
 
     o->l = ((Space&) home).alloc<int>(2);
     o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
-    o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);//((Space&) home).alloc<int*>(2);
+    o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
     o->x = ViewArray<IntView>((Space&) home, 2);
 
     o->x[0] = x0[i];
@@ -624,8 +625,8 @@ NonOverlapping(Home home, // Constructor for 2D
 
   dimensions = 2;
 
-  Int::IntView::schedule(home, *this, Int::ME_INT_DOM);
-  home.notice(*this, AP_DISPOSE);
+  Int::IntView::schedule(home, *this, Int::ME_INT_DOM); // Schedule the propagator
+  home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
 }
 
 // Post no-overlap propagator
@@ -665,15 +666,16 @@ NonOverlapping(Space& home, bool share, NonOverlapping& p)
     Object *o = ((Space&) home).alloc<Object>(1);
     o->fixed = pObj->fixed;
 
-    o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // TODO: might want to place min and max in same block?
-    o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions);
+    o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+    o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
 
-    o->l = home.alloc<int>(dimensions*4);
+    o->l = home.alloc<int>(dimensions*4); // Make sure memory block fits 3 more arrays of identical size
     o->rfre = &(o->l[dimensions]);
     o->rfrb = &(o->rfre[dimensions]);
     o->d_size = &(o->rfrb[dimensions]);
 
     o->x.update(home, share, pObj->x);
+
     for (int j = 0; j < dimensions; j++) {
       o->l[j] = pObj->l[j];
 
