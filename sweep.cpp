@@ -80,19 +80,19 @@ public:
 
 ForbiddenRegions::ForbiddenRegions(Region *r) : collection(*r), length(0), RRpos(0) {}
 
-FR* ForbiddenRegions::getRR() {
+forceinline FR* ForbiddenRegions::getRR() {
   return collection[(RRpos++ % length)];
 }
 
-void ForbiddenRegions::resetRR() {
+forceinline void ForbiddenRegions::resetRR() {
   RRpos = 0;
 }
 
-int ForbiddenRegions::size(void) {
+forceinline int ForbiddenRegions::size(void) {
   return length;
 }
 
-void ForbiddenRegions::insert(FR *f) {
+forceinline void ForbiddenRegions::insert(FR *f) {
   collection[length] = f;
   ++length;
 }
@@ -110,18 +110,18 @@ public:
   OBJECTS(Space& s) : collection(s), length(0) {};
 };
 
-void OBJECTS::prettyPrint() {
+forceinline void OBJECTS::prettyPrint() {
   for (int i = 0; i < size(); i++) {
     Object *o = collection[i];
     std::cout << o->x << "\n";
   }
 }
 
-int OBJECTS::size(void) {
+forceinline int OBJECTS::size(void) {
   return length;
 }
 
-void OBJECTS::insert(Object *f) {
+forceinline void OBJECTS::insert(Object *f) {
   collection[length] = f;
   ++length;
 }
@@ -162,7 +162,7 @@ protected:
   }
 
   // Generates relative FRs to the object o and stores them in F
-  void genOutBoxes(Region &r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  forceinline void genOutBoxes(Region &r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
@@ -257,7 +257,7 @@ protected:
   }
 
   /* Generates forbidden regions for object o given objects in O, merges forbidden regions where possible */
-  void genOutBoxesMerge(Region& r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  forceinline void genOutBoxesMerge(Region& r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     Support::DynamicQueue<FR*, Region> Q(r); // Queue for temporary storage of merge candidates
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
@@ -312,7 +312,7 @@ protected:
   }
 
   // Returns true iff c is feasible according to outbox
-  bool isFeasible(FR *outbox, int k, int *c) {
+  forceinline bool isFeasible(FR *outbox, int k, int *c) {
     for (int d = 0; d < k; d++) {
       if ((c[d] < outbox->min[d]) || (c[d] > outbox->max[d])) {
         return true;
@@ -322,7 +322,7 @@ protected:
   }
 
   // Returns next infeasible FR if one exists, NULL otherwise
-  FR *getFR(int k, int *c, ForbiddenRegions *actrs) {
+  forceinline FR *getFR(int k, int *c, ForbiddenRegions *actrs) {
     for (int i = 0; i < actrs->size(); i++) {
       FR *f = actrs->getRR(); // Using RR for getting the next FR
       if (!isFeasible(f, k, c)) { // forbidden region for c found
@@ -333,7 +333,7 @@ protected:
   }
 
   // Function for pruning the lower bound of object o in dimension d
-  ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
+  forceinline ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
     // SUPPORT optimisation
     bool supported = true;
 
@@ -419,7 +419,7 @@ protected:
   }
 
   // Function for pruning the upper bound of object o in dimension d
-  ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
+  forceinline ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
     // SUPPORT optimisation
     bool supported = true;
 
@@ -504,7 +504,7 @@ protected:
   }
 
   // R is a collection of rectangles participating in the problem
-  ExecStatus filter(Space &home, int k) {
+  forceinline ExecStatus filter(Space &home, int k) {
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
@@ -720,6 +720,7 @@ public:
     Int::IntView::schedule(home, *this, Int::ME_INT_BND);
   }
 
+  // Advise function, scheduled whenever its corresponding view changes
   virtual ExecStatus advise(Space& home, Advisor& a, const Delta& d) {
     int dim = (static_cast<ViewAdvisor&>(a)).dim;
     int i = (static_cast<ViewAdvisor&>(a)).i;
@@ -735,7 +736,7 @@ public:
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-    return filter((Home) home, dimensions);
+    return filter((Home) home, dimensions); // TODO: fixing dimensions = 2 here gives performance boost
   }
  
 };
@@ -747,7 +748,7 @@ public:
  * This is the function that you will call from your model. The best
  * is to paste the entire file into your model.
  */
-void nonOverlapping(Home home,
+void diffn(Home home,
                     const IntVarArgs& x, const IntArgs& w,
                     const IntVarArgs& y, const IntArgs& h) {
   // Check whether the arguments make sense
