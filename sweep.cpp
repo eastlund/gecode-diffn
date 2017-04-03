@@ -524,14 +524,8 @@ protected:
         genOutBoxesMerge(r, &F, Objects, k, o);
 
         if (o->x.assigned()) {
-          int c[k];
-          for (int i = 0; i < k; i++) {
-            c[i] = o->x[i].val();
-          }
-          if (getFR(k, c, &F)) {
+          if (F.size() > 0) { // If a FR exists, then o->x must be infeasible
             return ES_FAILED;
-          } else {
-            F.resetRR();
           }
         } else {
           for (int d = 0; d < k; d++) {
