@@ -603,7 +603,7 @@ public:
       o->id = i;
 
       maxl[0] = std::max(maxl[0], o->l[0]);
-      maxl[1] = std::max(maxl[0], o->l[1]);
+      maxl[1] = std::max(maxl[1], o->l[1]);
 
       o->support_min[0] = o->x[0].min();
       o->support_min[1] = o->x[1].min();
