@@ -50,7 +50,8 @@ public:
   // Arrays used in ADVISOR optimisation
   int *rfrb;
   int *rfre;
-  int *d_size;
+
+  int skippable;
 
   // Boolean used in SEPARATE optimisation
   bool fixed;
@@ -192,23 +193,12 @@ protected:
     }
   }
 
-  // Checks if object o can be skipped during relative FR generation
-  bool canSkip(Object *o, int k) {
-    for (int i = 0; i < k; i++) {
-      if (o->d_size[i] > (maxl[i] - 2)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /* Tries to coalesce f0 and f1.
    * Return cases:
    * 0: coalescing not possible
-   * 1: f0 includes f1 (completely overlaps)
+   * 1: f0 includes f1 (completely overlaps) or one of the two can be extended in one dimension to represent both FRs,
+   *    f0 is then changed in place to represent both.
    * 2: f1 includes f2 (completely overlaps)
-   * 3: one of the two can be extended in one dimension to represent both FRs,
-   *    f0 is changed in place to represent both.
    */
   int coalesce(FR *f0, FR *f1, int k) {
     // TODO: introduce enumerator
@@ -263,8 +253,7 @@ protected:
       Object *other = O->collection[i];
       
       if (!other->isSame(o)) { // For every other object <> o
-        if (canSkip(other, k)) {
-          //std::cout << "Skipping " << other->id << "\n";
+        if (other->skippable > 0) { 
           continue;
         }
 
@@ -275,8 +264,8 @@ protected:
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
-          const int min = other->rfrb[d] - o->l[d];//other->x[d].max() - o->l[d] + 1;
-          const int max = other->rfre[d];//other->x[d].min() + other->l[d] - 1;
+          const int min = other->rfrb[d] - o->l[d];
+          const int max = other->rfre[d];
           if ((min <= max) && overlaps(min, max, o, d)) {
             f->min[d] = min;
             f->max[d] = max;
@@ -358,7 +347,7 @@ protected:
     int *c = r.alloc<int>(k); // sweep-point
     // init c
     for (int i = 0; i < k; i++) {
-      c[i] = o->x[i].min();
+        c[i] = o->x[i].min();
     }
 
     int *n = r.alloc<int>(k); // jump vector
@@ -404,11 +393,17 @@ protected:
 
       ModEvent me = o->x[d].gq(home, c[d]); // prune o
       if (me_failed(me)) {
-        return ES_FAILED;
+        return ES_FAILED; // TODO: can this happen? (think about holes)
       } else if (me_modified(me)) {
         o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
+        o->rfrb[d] = o->x[d].max() + 1; // TODO: this is redundant
         o->rfre[d] = o->x[d].min() + o->l[d] - 1;
-        o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
+        if (o->skippable > 0) {
+          // Equivalent to not (o->x[d].max() - o->x[d].min() - o->l[d]) > maxl[d] - 2)
+          if (not (o->rfrb[d] - o->rfre[d] > maxl[d])) {
+            o->skippable--;
+          }
+        }
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -493,7 +488,13 @@ protected:
       } else if (me_modified(me)) {
         o->support_max[d*k+d] = o->x[d].max(); // In case c[d] was in a hole
         o->rfrb[d] = o->x[d].max() + 1;
-        o->d_size[d] = o->x[d].max() - o->x[d].min() - o->l[d];
+        o->rfre[d] = o->x[d].min() + o->l[d] - 1; // TODO: this is redundant.
+        if (o->skippable > 0 ) {
+          // Equivalent to not (o->x[d].max() - o->x[d].min() - o->l[d]) > maxl[d] - 2)
+          if (not (o->rfrb[d] - o->rfre[d] > maxl[d])) {
+            o->skippable--;
+          }
+        }
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -617,10 +618,12 @@ public:
       o->rfrb[1] = o->x[1].max() + 1;
       o->rfre[1] = o->x[1].min() + o->l[1] - 1;
 
-      o->d_size = ((Space&) home).alloc<int>(2);
-
-      o->d_size[0] = o->x[0].max() - o->x[0].min() - o->l[0];
-      o->d_size[1] = o->x[1].max() - o->x[1].min() - o->l[1];
+      o->skippable = 2; // Assume skippable in both dimensions
+      for (int j = 0; j < 2; j++) {
+        if (not ((o->x[j].max() - o->x[j].min() - o->l[j]) > maxl[j] - 2)) {
+          o->skippable--;
+        }
+      }
 
       o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i));
       o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i));
@@ -674,10 +677,9 @@ public:
       o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
       o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
 
-      o->l = home.alloc<int>(dimensions*4); // Make sure memory block fits 3 more arrays of identical size
+      o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
       o->rfre = &(o->l[dimensions]);
       o->rfrb = &(o->rfre[dimensions]);
-      o->d_size = &(o->rfrb[dimensions]);
 
       o->x.update(home, share, pObj->x);
 
@@ -691,9 +693,9 @@ public:
         
         o->rfre[j] = pObj->rfre[j];
         o->rfrb[j] = pObj->rfrb[j];
-
-        o->d_size[j] = pObj->d_size[j];
       }
+
+      o->skippable = pObj->skippable; // Assume skippable in both dimensions
       o->id = pObj->id;
       Objects->insert(o);
     }
@@ -723,7 +725,12 @@ public:
     // update values since view changed
     o->rfrb[dim] = o->x[dim].max() + 1; 
     o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
-    o->d_size[dim] = o->x[dim].max() - o->x[dim].min() - o->l[dim];
+    
+    if (o->skippable > 0) {
+      if (not (o->rfrb[dim] - o->rfre[dim] > maxl[dim])) {
+        o->skippable--;
+      }
+    }
 
     return ES_NOFIX;
   }
