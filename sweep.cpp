@@ -51,6 +51,8 @@ public:
   int *rfrb;
   int *rfre;
 
+  // Reference counter used in ENABLE optimisation, if = 0, then the
+  // object can be skipped during relative FR generation
   int skippable;
 
   // Boolean used in SEPARATE optimisation
@@ -336,6 +338,7 @@ protected:
 
     /* SUPPORT optimisation */
     // Considering the d:th row in the support_min "matrix"
+    // TODO: oklart om det är värt att ha denna, Mats verkade tycka den bör skippas i fördel till den "buggade" support
     if (supported && !getFR(k, &(o->support_min[d*k]), F)) {
       return ES_FIX;
     }
@@ -428,6 +431,7 @@ protected:
 
     /* SUPPORT optimisation */
     // Considering the d:th row in the support_max "matrix"
+    // TODO: oklart om det är värt att ha denna, Mats verkade tycka den bör skippas i fördel till den "buggade" support
     if (supported && !getFR(k, &(o->support_max[d*k]), F)) {
       return ES_FIX;
     }
@@ -674,27 +678,30 @@ public:
       Object *o = ((Space&) home).alloc<Object>(1);
       o->fixed = pObj->fixed;
 
-      o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-      o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-
       o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
       o->rfre = &(o->l[dimensions]);
       o->rfrb = &(o->rfre[dimensions]);
-
-      o->x.update(home, share, pObj->x);
-
+      
       for (int j = 0; j < dimensions; j++) {
         o->l[j] = pObj->l[j];
-
-        for (int d = 0; d < dimensions; d++) {
-          o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
-          o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
-        }
-        
         o->rfre[j] = pObj->rfre[j];
         o->rfrb[j] = pObj->rfrb[j];
       }
 
+      // Only copy support if the object is not fixed
+      if (!o->fixed) {
+        o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+        o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+        
+        for (int j = 0; j < dimensions; j++) {
+          for (int d = 0; d < dimensions; d++) {
+            o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
+            o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
+          }
+        }
+      }
+
+      o->x.update(home, share, pObj->x);
       o->skippable = pObj->skippable; // Assume skippable in both dimensions
       o->id = pObj->id;
       Objects->insert(o);
