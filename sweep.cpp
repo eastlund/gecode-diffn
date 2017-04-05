@@ -102,16 +102,20 @@ forceinline void ForbiddenRegions::insert(FR *f) {
 
 /* The OBJECTS class, used for storing Objects */
 class OBJECTS {
-private:
   int length;
 public:
-  Support::DynamicArray<Object*, Space> collection;
+  Object** collection; // Collection stores pointers to Objects
   int size();
-  void insert(Object*);
+  void insert(Object*, int i);
   void prettyPrint();
 
-  OBJECTS(Space& s) : collection(s), length(0) {};
+  OBJECTS(Space &h, int l);
 };
+
+OBJECTS::OBJECTS(Space &h, int l) {
+  length = l;
+  collection = h.alloc<Object*>(length);
+}
 
 forceinline void OBJECTS::prettyPrint() {
   for (int i = 0; i < size(); i++) {
@@ -124,9 +128,8 @@ forceinline int OBJECTS::size(void) {
   return length;
 }
 
-forceinline void OBJECTS::insert(Object *f) {
-  collection[length] = f;
-  ++length;
+forceinline void OBJECTS::insert(Object *f, int i) {
+  collection[i] = f;
 }
 
 // The diffn propagator
@@ -579,7 +582,7 @@ public:
     : Propagator(home), c(home)
   {
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
-    new(Objects) OBJECTS((Space &) home);
+    new(Objects) OBJECTS((Space &) home, x0.size());
 
     maxl = ((Space&) home).alloc<int>(2);
     maxl[0] = -1;
@@ -632,7 +635,7 @@ public:
       o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i));
       o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i));
 
-      Objects->insert(o);
+      Objects->insert(o, i);
     }
 
     dimensions = 2;
@@ -665,7 +668,7 @@ public:
     : Propagator(home,share,p) {
     dimensions = p.dimensions;
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
-    new(Objects) OBJECTS((Space &) home);
+    new(Objects) OBJECTS((Space &) home, p.Objects->size());
 
     maxl = ((Space&) home).alloc<int>(dimensions);
     
@@ -704,7 +707,7 @@ public:
       o->x.update(home, share, pObj->x);
       o->skippable = pObj->skippable; // Assume skippable in both dimensions
       o->id = pObj->id;
-      Objects->insert(o);
+      Objects->insert(o, i);
     }
 
     c.update(home, share, p.c);
