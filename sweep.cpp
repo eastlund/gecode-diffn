@@ -31,12 +31,18 @@
 using namespace Gecode;
 using namespace Gecode::Int;
 
-/* The FR class represents forbidden regions using two arrays, min and max */
-class FR {
-public:
-  int *min; // origin per dimension
-  int *max; // maximal per dimension
-};
+/* The Dim struct represents a minimum and maximum value in a given
+   dimension */
+typedef struct dim {
+  int min;
+  int max;
+} Dim;
+
+/* The FR struct represents forbidden regions consisting of k
+   dimensions, each dimension containing min and max of the FR */
+typedef struct fr {
+  Dim dim[];
+} FR;
 
 /* The Object class represents a hyperrectangle object */
 class Object {
@@ -65,26 +71,69 @@ bool Object::isSame(Object *o) {
   return id == o->id;
 }
 
-/* The ForbiddenRegions class is used for storing forbidden regions and retrieving them using RR scheduling */
+/* The ForbiddenRegions class is used for storing forbidden regions
+   and retrieving them using RR scheduling */
 class ForbiddenRegions {
 private:
-  int RRpos; // Current RR position in GetFR
-  int length; // Amount of FRs in collection
+  int RRpos;          // Current RR position in GetFR
+  int length;         // Amount of FRs in collection
+  int dimensions;     // Number of dimensions used
 public:
-  Support::DynamicArray<FR*, Region> collection; // TODO: this will be private in the future
+  FR* collection;     // Collection stores FRs in place
 public:
-  int size();
-  void insert(FR*);
-  FR* getRR();
-  void resetRR();
-  ForbiddenRegions(Region*);
+  int size();         // Gives the amount of FRs in collection
+  void insert(FR*);   // Insert FR at top of stack (by copying contents)
+  FR* getRR();        // Get FR based on RR scheduling
+  void resetRR();     // Reset RR scheduling
+  void prettyPrint(); // Prettyprinting the FRs
+  FR* get(int);       // Get FR at given index
+  FR* getTop();       // Get FR on top of FR stack
+  void incTop();      // Increment the top of the stack
+  void decTop();      // Decrement the top of the stack
+  ForbiddenRegions(Region&, int, int);
 };
 
 
-ForbiddenRegions::ForbiddenRegions(Region *r) : collection(*r), length(0), RRpos(0) {}
+ForbiddenRegions::ForbiddenRegions(Region &r, int k, int n) : length(0), RRpos(0), dimensions(k) {
+  collection = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k)*n);
+}
+
+forceinline FR *ForbiddenRegions::getTop() {
+  return (FR*) ((char *)collection + (sizeof(FR) + sizeof(Dim)*dimensions)*length);
+}
+
+forceinline FR *ForbiddenRegions::get(int idx) {
+  return (FR*) ((char *)collection + (sizeof(FR) + sizeof(Dim)*dimensions)*idx);
+}
+
+forceinline void ForbiddenRegions::incTop() {
+  length++;
+}
+
+forceinline void ForbiddenRegions::decTop() {
+  length--;
+}
+
+forceinline void ForbiddenRegions::prettyPrint() {
+  std::cout << "----------ForbiddenRegions----------\n";
+  for (int i = 0; i < size(); i++) {
+    FR *f = get(i);
+    std::cout << "(";
+    
+    for (int d = 0; d < dimensions; d++) {
+      std::cout << f->dim[d].min << ".." << f->dim[d].max;
+
+      if (not d + 1 == dimensions) {
+        std::cout << ",";
+      }
+    }
+    std::cout << ")\n";
+  }
+  std::cout << "------------------------------------\n";
+}
 
 forceinline FR* ForbiddenRegions::getRR() {
-  return collection[(RRpos++ % length)];
+  return get(RRpos++ % length);
 }
 
 forceinline void ForbiddenRegions::resetRR() {
@@ -96,8 +145,11 @@ forceinline int ForbiddenRegions::size(void) {
 }
 
 forceinline void ForbiddenRegions::insert(FR *f) {
-  collection[length] = f;
-  ++length;
+  for (int i = 0; i < dimensions; i++) {
+    get(length)->dim[i].min = f->dim[i].min;
+    get(length)->dim[i].max = f->dim[i].max;
+  }
+  incTop();
 }
 
 /* The OBJECTS class, used for storing Objects */
@@ -169,21 +221,20 @@ protected:
 
   // Generates relative FRs to the object o and stores them in F
   forceinline void genOutBoxes(Region &r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+    int top = F->size();
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every object <> o
-        FR *f = (FR *) r.alloc<FR>(1);
-        f->min = r.alloc<int>(k*2); // Making sure f->max also fits
-        f->max = &(f->min[k]);
+        FR *f = F->get(top);
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
           const int min = other->x[d].max() - o->l[d] + 1;
           const int max = other->x[d].min() + other->l[d] - 1;
           if ((min <= max) && overlaps(min, max, o, d)) {
-            f->min[d] = min;
-            f->max[d] = max;
+            f->dim[d].min = min;
+            f->dim[d].max = max;
           } else {
             exists = false;
             break; // Break loop, other is not interfering with o
@@ -192,7 +243,8 @@ protected:
 
         // Only add forbidden region if it exists
         if (exists) {
-          F->insert(f);
+          F->incTop();
+          top++;
         }
       }
     }
@@ -211,17 +263,17 @@ protected:
     int e = 0; // In case 3, what dimension can be extended?
 
     for (int d = 0; d < k; d++) {
-      if (f0->max[d] + 1 < f1->min[d] || f0->min[d] > f1->max[d] + 1) { /* Do not coalesce */
+      if (f0->dim[d].max + 1 < f1->dim[d].min || f0->dim[d].min > f1->dim[d].max + 1) { /* Do not coalesce */
         return 0;
-      } else if (f0->min[d] == f1->min[d] && f0->max[d] == f1->max[d]) { /* Equal in dimension d */
+      } else if (f0->dim[d].min == f1->dim[d].min && f0->dim[d].max == f1->dim[d].max) { /* Equal in dimension d */
         // no-op
-      } else if (f0->min[d] <= f1->min[d] && f0->max[d] >= f1->max[d]) { /* f1 \subset f0*/
+      } else if (f0->dim[d].min <= f1->dim[d].min && f0->dim[d].max >= f1->dim[d].max) { /* f1 \subset f0*/
         if (trend == 0 || trend == 1) {
           trend = 1;
         } else {
           return 0; // The FRs cannot be coalesced
         }
-      } else if (f0->min[d] >= f1->min[d] && f0->max[d] <= f1->max[d]) { /* f0 \subset f1*/
+      } else if (f0->dim[d].min >= f1->dim[d].min && f0->dim[d].max <= f1->dim[d].max) { /* f0 \subset f1*/
         if (trend == 0 || trend == 2) {
           trend = 2;
         } else {
@@ -245,15 +297,14 @@ protected:
     case 2: /* f1 includes f0 */
       return 2;
     case 3: /* They overlap in dimension e, let f0 represent them both */
-      f0->min[e] = std::min(f0->min[e], f1->min[e]);
-      f0->max[e] = std::max(f0->max[e], f1->max[e]);
+      f0->dim[e].min = std::min(f0->dim[e].min, f1->dim[e].min);
+      f0->dim[e].max = std::max(f0->dim[e].max, f1->dim[e].max);
       return 1;
     }
   }
 
   /* Generates forbidden regions for object o given objects in O, merges forbidden regions where possible */
   forceinline void genOutBoxesMerge(Region& r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
-    Support::DynamicQueue<FR*, Region> Q(r); // Queue for temporary storage of merge candidates
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
       
@@ -262,9 +313,7 @@ protected:
           continue;
         }
 
-        FR *f = (FR *) r.alloc<FR>(1);
-        f->min = r.alloc<int>(k*2);
-        f->max = &(f->min[k]);
+        FR *f = F->getTop();
 
         bool exists = true; // Assume f exists
 
@@ -272,8 +321,8 @@ protected:
           const int min = other->rfrb[d] - o->l[d];
           const int max = other->rfre[d];
           if ((min <= max) && overlaps(min, max, o, d)) {
-            f->min[d] = min;
-            f->max[d] = max;
+            f->dim[d].min = min;
+            f->dim[d].max = max;
           } else {
             exists = false;
             break; // Break loop, other is not interfering with o
@@ -281,34 +330,37 @@ protected:
         }
 
         if (exists) {
-          while (exists && !Q.empty()) {
-            FR *f0 = Q.pop();
+          while (exists && F->size() > 0) {
+            FR *f0 = F->get(F->size()-1); // Get the FR one step from the top
             switch (coalesce(f0, f, k)) { /* Try to coalesce the FRs */
             case 0:  /* No coalescing possible */
-              Q.push(f0);
+              // no-op, f0 stays in place
               exists = false;
               break;
             case 1: /* f0 subsumes f */
+              F->decTop(); // 
               f = f0;
               break;
             case 2: /* f subsumes f0 */
+              for (int d = 0; d < k; d++) {
+                f0->dim[d].min = f->dim[d].min;
+                f0->dim[d].max = f->dim[d].max;
+              }
+              f = f0;
+              F->decTop();
               break;
             }
           }
-          Q.push(f);
+          F->incTop();
         }
       }
-    }
-
-    while (!Q.empty()) {
-      F->insert(Q.pop());
     }
   }
 
   // Returns true iff c is feasible according to outbox
   forceinline bool isFeasible(FR *outbox, int k, int *c) {
     for (int d = 0; d < k; d++) {
-      if ((c[d] < outbox->min[d]) || (c[d] > outbox->max[d])) {
+      if ((c[d] < outbox->dim[d].min) || (c[d] > outbox->dim[d].max)) {
         return true;
       }
     }
@@ -341,7 +393,6 @@ protected:
 
     /* SUPPORT optimisation */
     // Considering the d:th row in the support_min "matrix"
-    // TODO: oklart om det är värt att ha denna, Mats verkade tycka den bör skippas i fördel till den "buggade" support
     if (supported && !getFR(k, &(o->support_min[d*k]), F)) {
       return ES_FIX;
     }
@@ -369,7 +420,7 @@ protected:
     while (b and currentF) {
       // update jump-vector
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
-        n[i] = std::min(n[i], currentF->max[i] + 1);
+        n[i] = std::min(n[i], currentF->dim[i].max + 1);
       }
       
       b = false; // No new point to jump to yet (assume failure)
@@ -434,7 +485,6 @@ protected:
 
     /* SUPPORT optimisation */
     // Considering the d:th row in the support_max "matrix"
-    // TODO: oklart om det är värt att ha denna, Mats verkade tycka den bör skippas i fördel till den "buggade" support
     if (supported && !getFR(k, &(o->support_max[d*k]), F)) {
       return ES_FIX;
     }
@@ -461,7 +511,7 @@ protected:
     // While we have not failed and c is infeasible
     while (b and currentF) {
       for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
-        n[i] = std::max(n[i], currentF->min[i] - 1);
+        n[i] = std::max(n[i], currentF->dim[i].min - 1);
       }
 
       b = false; // No new point to jump to yet (assume failure)
@@ -516,6 +566,8 @@ protected:
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
+    //FR *t = (FR*)home.ralloc(sizeof(FR) + sizeof(Dim)*dimensions);
+
     while (nonfix) {
       nonfix = false;
       allfixed = true;
@@ -527,10 +579,10 @@ protected:
           continue; 
         }
 
-        Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
-        ForbiddenRegions F(&r); 
+        Region r(home);
+        ForbiddenRegions F(r, k, Objects->size()-1); 
         genOutBoxesMerge(r, &F, Objects, k, o);
-
+        
         if (o->x.assigned()) {
           if (F.size() > 0) { // If a FR exists, then o->x must be infeasible
             return ES_FAILED;
