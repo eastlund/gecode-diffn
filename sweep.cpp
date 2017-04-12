@@ -566,8 +566,6 @@ protected:
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
-    //FR *t = (FR*)home.ralloc(sizeof(FR) + sizeof(Dim)*dimensions);
-
     while (nonfix) {
       nonfix = false;
       allfixed = true;
@@ -579,7 +577,7 @@ protected:
           continue; 
         }
 
-        Region r(home);
+        Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
         ForbiddenRegions F(r, k, Objects->size()-1); 
         genOutBoxesMerge(r, &F, Objects, k, o);
         
@@ -780,21 +778,28 @@ public:
 
   // Advise function, scheduled whenever its corresponding view changes
   virtual ExecStatus advise(Space& home, Advisor& a, const Delta& d) {
-    int dim = (static_cast<ViewAdvisor&>(a)).dim;
-    int i = (static_cast<ViewAdvisor&>(a)).i;
-    Object *o = Objects->collection[i];
+    ModEvent me = IntView::modevent(d);
 
-    // update values since view changed
-    o->rfrb[dim] = o->x[dim].max() + 1; 
-    o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
+    /* Only update values if a bound was changed */
+    if (me == ME_INT_BND || me == ME_INT_VAL) {
+      int dim = (static_cast<ViewAdvisor&>(a)).dim;
+      int i = (static_cast<ViewAdvisor&>(a)).i;
+      Object *o = Objects->collection[i];
+      
+      // update values since view changed
+      o->rfrb[dim] = o->x[dim].max() + 1; 
+      o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
     
-    if (o->skippable > 0) {
-      if (not (o->rfrb[dim] - o->rfre[dim] > maxl[dim])) {
-        o->skippable--;
+      if (o->skippable > 0) {
+        if (not (o->rfrb[dim] - o->rfre[dim] > maxl[dim])) {
+          o->skippable--;
+        }
       }
-    }
 
-    return ES_NOFIX;
+      return ES_NOFIX; // Must schedule as bound was changed or view was assigned a value
+    } else {
+      return ES_FIX; // Don't schedule if no bound was changed
+    }
   }
     
   // Perform propagation
