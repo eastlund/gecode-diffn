@@ -57,7 +57,7 @@ public:
   int *rfrb;
   int *rfre;
 
-  // Reference counter used in ENABLE optimisation, if = 0, then the
+  // Reference counter used in ENABLE optimisation, if > 0, then the
   // object can be skipped during relative FR generation
   int skippable;
 
@@ -197,12 +197,13 @@ protected:
     //Int::IntView x;
     int dim; // What dimension in the corresponding viewarray is this advisor responsible for?
     int i; // The corresponding object
+    bool skippable; // ENABLE optimisation: is the corresponding object skippable in this dimension?
     ViewAdvisor(Space& home, Propagator& p, 
                 Council<ViewAdvisor>& c, int d, int idx) 
-      : Advisor(home,p,c), dim(d), i(idx) {
+      : Advisor(home,p,c), dim(d), i(idx), skippable(true) {
     }
     ViewAdvisor(Space& home, bool share, ViewAdvisor& a)
-      : Advisor(home,share,a), dim(a.dim), i(a.i) {
+      : Advisor(home,share,a), dim(a.dim), i(a.i), skippable(a.skippable) {
     }
     void dispose(Space& home, Council<ViewAdvisor>& c) {
       Advisor::dispose(home,c);
@@ -220,7 +221,7 @@ protected:
   }
 
   // Generates relative FRs to the object o and stores them in F
-  forceinline void genOutBoxes(Region &r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  forceinline void genOutBoxes(ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     int top = F->size();
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
@@ -304,7 +305,7 @@ protected:
   }
 
   /* Generates forbidden regions for object o given objects in O, merges forbidden regions where possible */
-  forceinline void genOutBoxesMerge(Region& r, ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
+  forceinline void genOutBoxesMerge(ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     for (int i = 0; i < O->size(); i++) {
       Object *other = O->collection[i];
       
@@ -404,7 +405,7 @@ protected:
     int *c = r.alloc<int>(k); // sweep-point
     // init c
     for (int i = 0; i < k; i++) {
-        c[i] = o->x[i].min();
+      c[i] = o->x[i].min();
     }
 
     int *n = r.alloc<int>(k); // jump vector
@@ -452,15 +453,6 @@ protected:
       if (me_failed(me)) {
         return ES_FAILED; // TODO: can this happen? (think about holes)
       } else if (me_modified(me)) {
-        o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
-        o->rfrb[d] = o->x[d].max() + 1; // TODO: this is redundant
-        o->rfre[d] = o->x[d].min() + o->l[d] - 1;
-        if (o->skippable > 0) {
-          // Equivalent to not (o->x[d].max() - o->x[d].min() - o->l[d]) > maxl[d] - 2)
-          if (not (o->rfrb[d] - o->rfre[d] > maxl[d])) {
-            o->skippable--;
-          }
-        }
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -543,15 +535,6 @@ protected:
       if (me_failed(me)) {
         return ES_FAILED;
       } else if (me_modified(me)) {
-        o->support_max[d*k+d] = o->x[d].max(); // In case c[d] was in a hole
-        o->rfrb[d] = o->x[d].max() + 1;
-        o->rfre[d] = o->x[d].min() + o->l[d] - 1; // TODO: this is redundant.
-        if (o->skippable > 0 ) {
-          // Equivalent to not (o->x[d].max() - o->x[d].min() - o->l[d]) > maxl[d] - 2)
-          if (not (o->rfrb[d] - o->rfre[d] > maxl[d])) {
-            o->skippable--;
-          }
-        }
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -566,6 +549,14 @@ protected:
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
+    // TODO: maybe allocate forbiddenregion collection here, initilise
+    // forbiddenregions-object with address to this area. It might be
+    // slower to create one region here however, since the scope will
+    // become quite large compared to one region per object, in SPP it
+    // seems that it is not worth it. MPG: "(keep scope of a region
+    // small)" In instances with more objects it should be better to
+    // allocate once here however. TODO: measure and test!
+
     while (nonfix) {
       nonfix = false;
       allfixed = true;
@@ -576,10 +567,10 @@ protected:
         if (o->fixed) {
           continue; 
         }
-
+        
         Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
         ForbiddenRegions F(r, k, Objects->size()-1); 
-        genOutBoxesMerge(r, &F, Objects, k, o);
+        genOutBoxesMerge(&F, Objects, k, o);
         
         if (o->x.assigned()) {
           if (F.size() > 0) { // If a FR exists, then o->x must be infeasible
@@ -755,7 +746,7 @@ public:
       }
 
       o->x.update(home, share, pObj->x);
-      o->skippable = pObj->skippable; // Assume skippable in both dimensions
+      o->skippable = pObj->skippable;
       o->id = pObj->id;
       Objects->insert(o, i);
     }
@@ -777,22 +768,23 @@ public:
   }
 
   // Advise function, scheduled whenever its corresponding view changes
-  virtual ExecStatus advise(Space& home, Advisor& a, const Delta& d) {
+  virtual ExecStatus advise(Space& home, Advisor& _a, const Delta& d) {
     ModEvent me = IntView::modevent(d);
 
     /* Only update values if a bound was changed */
     if (me == ME_INT_BND || me == ME_INT_VAL) {
-      int dim = (static_cast<ViewAdvisor&>(a)).dim;
-      int i = (static_cast<ViewAdvisor&>(a)).i;
-      Object *o = Objects->collection[i];
+      ViewAdvisor& a = static_cast<ViewAdvisor&>(_a);
+      int dim = a.dim;
+      Object *o = Objects->collection[a.i];
       
       // update values since view changed
       o->rfrb[dim] = o->x[dim].max() + 1; 
       o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
     
-      if (o->skippable > 0) {
+      if (a.skippable) {
         if (not (o->rfrb[dim] - o->rfre[dim] > maxl[dim])) {
           o->skippable--;
+          a.skippable = false; // Don't decrement skippable counter more than once per dimension
         }
       }
 
