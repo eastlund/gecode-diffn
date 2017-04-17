@@ -202,6 +202,10 @@ protected:
                 Council<ViewAdvisor>& c, int d, int idx) 
       : Advisor(home,p,c), dim(d), i(idx), skippable(true) {
     }
+    ViewAdvisor(Space& home, Propagator& p, 
+                Council<ViewAdvisor>& c, int d, int idx, bool skipped) 
+      : Advisor(home,p,c), dim(d), i(idx), skippable(skipped) {
+    }
     ViewAdvisor(Space& home, bool share, ViewAdvisor& a)
       : Advisor(home,share,a), dim(a.dim), i(a.i), skippable(a.skippable) {
     }
@@ -549,13 +553,10 @@ protected:
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
-    // TODO: maybe allocate forbiddenregion collection here, initilise
-    // forbiddenregions-object with address to this area. It might be
-    // slower to create one region here however, since the scope will
-    // become quite large compared to one region per object, in SPP it
-    // seems that it is not worth it. MPG: "(keep scope of a region
-    // small)" In instances with more objects it should be better to
-    // allocate once here however. TODO: measure and test!
+    // TODO: allocate forbiddenregion collection here, initilise forbiddenregions-object with address to this area
+    // It might be slower to create one region here however, since the scope will become quite large compared to one region per object, in SPP it seems that it is not worth it. "(keep scope of a region small)"
+    // In instances with more objects it should be better to allocate once here however.
+    // TODO: measure and test!
 
     while (nonfix) {
       nonfix = false;
@@ -667,16 +668,24 @@ public:
       o->rfre[1] = o->x[1].min() + o->l[1] - 1;
 
       o->skippable = 2; // Assume skippable in both dimensions
+
+      Objects->insert(o, i);
+    }
+
+    /* Need to calculate skippable here since maxl is not calculated fully above */
+    for (int i = 0; i < x0.size(); i++) {
+      Object *o = Objects->collection[i];
+      bool tmp[2] = {true, true}; // tmp[i] = true iff o is skippable in dimension i
+
       for (int j = 0; j < 2; j++) {
-        if (not ((o->x[j].max() - o->x[j].min() - o->l[j]) > maxl[j] - 2)) {
+        if (not (o->rfrb[j] - o->rfre[j] > maxl[j])) {
           o->skippable--;
+          tmp[j] = false;
         }
       }
 
-      o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i));
-      o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i));
-
-      Objects->insert(o, i);
+      o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i,tmp[0]));
+      o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i,tmp[1]));
     }
 
     dimensions = 2;
