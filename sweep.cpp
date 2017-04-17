@@ -457,6 +457,7 @@ protected:
       if (me_failed(me)) {
         return ES_FAILED; // TODO: can this happen? (think about holes)
       } else if (me_modified(me)) {
+        o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -539,6 +540,7 @@ protected:
       if (me_failed(me)) {
         return ES_FAILED;
       } else if (me_modified(me)) {
+        o->support_max[d * k + d] = o->x[d].max(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
