@@ -63,6 +63,8 @@ public:
 
   // Boolean used in SEPARATE optimisation
   bool fixed;
+
+  bool source;
   
   bool isSame(Object *);
 };
@@ -224,6 +226,15 @@ protected:
     return true;
   }
 
+  bool overlaps(FR *f, Object *o, int k) {
+    for (int i = 0; i < k; i++) {
+      if ((o->x[i].max() < f->dim[i].min) || (o->x[i].min() > f->dim[i].max)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Generates relative FRs to the object o and stores them in F
   forceinline void genOutBoxes(ForbiddenRegions *F, OBJECTS *O, int k, Object *o) {
     int top = F->size();
@@ -231,6 +242,10 @@ protected:
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every object <> o
+        if (other->skippable > 0 || !other->source) { 
+          continue;
+        }
+
         FR *f = F->get(top);
         bool exists = true; // Assume f exists
 
@@ -314,7 +329,7 @@ protected:
       Object *other = O->collection[i];
       
       if (!other->isSame(o)) { // For every other object <> o
-        if (other->skippable > 0) { 
+        if (other->skippable > 0 || !other->source) { 
           continue;
         }
 
@@ -343,7 +358,7 @@ protected:
               exists = false;
               break;
             case 1: /* f0 subsumes f */
-              F->decTop(); // 
+              F->decTop();
               f = f0;
               break;
             case 2: /* f subsumes f0 */
@@ -568,7 +583,7 @@ protected:
 
         // SEPARATE: if o is fixed and checked, then skip it.
         if (o->fixed) {
-          continue; 
+          continue;
         }
         
         Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
@@ -610,6 +625,35 @@ protected:
       }
     }
 
+    Region r(home);
+    FR *f = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k));
+    
+    for (int i = 0; i < k; i++) {
+      f->dim[i].min = Gecode::Int::Limits::infinity;
+      f->dim[i].max = Gecode::Int::Limits::min;
+    }
+
+    for (int i = 0; i < Objects->size(); i++) {
+      Object *o = Objects->collection[i];
+      
+      if (o->fixed) {
+        continue;
+      }
+
+      for (int i = 0; i < k; i++) {
+        f->dim[i].min = std::min(f->dim[i].min, o->x[i].min());
+        f->dim[i].max = std::max(f->dim[i].max, o->x[i].max() + o->l[i]);
+      }
+    }
+
+    for (int i = 0; i < Objects->size(); i++) {
+      Object *o = Objects->collection[i];
+
+      if (o->fixed && !overlaps(f, o, k)) {
+        o->source = false; // TODO: this should be "two collections"!
+      }
+    }
+
     // If all objects are fixed and we have not failed, we can subsume
     if (allfixed) {
       return home.ES_SUBSUMED(*this);
@@ -636,6 +680,7 @@ public:
     for (int i = 0; i < x0.size(); i++) {
       Object *o = ((Space&) home).alloc<Object>(1);
       o->fixed = false;
+      o->source = true;
 
       o->l = ((Space&) home).alloc<int>(2);
       o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
@@ -732,15 +777,19 @@ public:
       Object *pObj = p.Objects->collection[i];
       Object *o = ((Space&) home).alloc<Object>(1);
       o->fixed = pObj->fixed;
+      o->source = pObj->source;
 
-      o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
-      o->rfre = &(o->l[dimensions]);
-      o->rfrb = &(o->rfre[dimensions]);
+      // Only copy if o is still a source object
+      if (o->source) {
+        o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
+        o->rfre = &(o->l[dimensions]);
+        o->rfrb = &(o->rfre[dimensions]);
       
-      for (int j = 0; j < dimensions; j++) {
-        o->l[j] = pObj->l[j];
-        o->rfre[j] = pObj->rfre[j];
-        o->rfrb[j] = pObj->rfrb[j];
+        for (int j = 0; j < dimensions; j++) {
+          o->l[j] = pObj->l[j];
+          o->rfre[j] = pObj->rfre[j];
+          o->rfrb[j] = pObj->rfrb[j];
+        }
       }
 
       // Only copy support if the object is not fixed
