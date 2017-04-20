@@ -661,28 +661,28 @@ protected:
     // activeBox is a bounding box for all non-fixed objects
     FR *activeBox = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k));
     
-    for (int i = 0; i < k; i++) {
-      activeBox->dim[i].min = Gecode::Int::Limits::infinity;
-      activeBox->dim[i].max = Gecode::Int::Limits::min;
+    for (int j = 0; j < k; j++) {
+      activeBox->dim[j].min = Gecode::Int::Limits::infinity;
+      activeBox->dim[j].max = Gecode::Int::Limits::min;
     }
 
     for (int i = 0; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
       
-      if (o->fixed) {
+      if (o->fixed || !o->source) {
         continue;
       }
 
-      for (int i = 0; i < k; i++) {
-        activeBox->dim[i].min = std::min(activeBox->dim[i].min, o->x[i].min());
-        activeBox->dim[i].max = std::max(activeBox->dim[i].max, o->x[i].max() + o->l[i] - 1);
+      for (int j = 0; j < k; j++) {
+        activeBox->dim[j].min = std::min(activeBox->dim[j].min, o->x[j].min());
+        activeBox->dim[j].max = std::max(activeBox->dim[j].max, o->x[j].max() + o->l[j] - 1);
       }
     }
 
     for (int i = 0; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
 
-      if (o->fixed && cantOverlap(activeBox, o, k)) {
+      if (o->fixed && o->source && cantOverlap(activeBox, o, k)) {
         o->source = false; // TODO: this should be "two collections"!
       }
     }
