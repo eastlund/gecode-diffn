@@ -192,6 +192,8 @@ protected:
   OBJECTS *Objects; // Objects being filtered
   int dimensions; // Number of dimensions of the problem
 
+  FR *B; // Bounding box for INCREMENTAL optimsation
+
   int *maxl;
 
   class ViewAdvisor : public Advisor {
@@ -571,15 +573,48 @@ protected:
     // In instances with more objects it should be better to allocate once here however.
     // TODO: measure and test!
 
+    // Bounding box for temporary storage of information from external events
+    FR *externalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
+
+    for (int j = 0; j < k; j++) {
+      externalB->dim[j].min = B->dim[j].min;
+      externalB->dim[j].max = B->dim[j].max;
+
+      // Reset bounding box B to consider internal events within fixpoint loop
+      B->dim[j].min = Gecode::Int::Limits::infinity;
+      B->dim[j].max = Gecode::Int::Limits::min;
+    }
+
+    // Boolean indicating whether fixpoint-loop is on first iteration (needed for INCREMENTAL optimsation)
+    bool first = true;
+
     while (nonfix) {
       nonfix = false;
       allfixed = true;
+
       for (int i = 0; i < Objects->size(); i++) {
         Object *o = Objects->collection[i];
 
         // SEPARATE: if o is fixed and checked, then skip it.
         if (o->fixed) {
           continue;
+        }
+
+        // INCREMENTAL: is o inside bounding box of modified objects?
+        if (first) {
+          if (cantOverlap(externalB, o, k)) { // Consider external events
+            if (!o->x.assigned()) {
+              allfixed = false;
+            }
+            continue; 
+          }
+        } else {
+          if (cantOverlap(B, o, k)) { // Consider internal events. I.e., modifications made inside fixpoint loop 
+            if (!o->x.assigned()) {
+              allfixed = false;
+            }
+            continue; 
+          }
         }
         
         Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
@@ -619,14 +654,16 @@ protected:
           o->fixed = true;
         }
       }
+      first = false; // First iteration done
     }
 
     Region r(home);
-    FR *f = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k));
+    // activeBox is a bounding box for all non-fixed objects
+    FR *activeBox = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k));
     
     for (int i = 0; i < k; i++) {
-      f->dim[i].min = Gecode::Int::Limits::infinity;
-      f->dim[i].max = Gecode::Int::Limits::min;
+      activeBox->dim[i].min = Gecode::Int::Limits::infinity;
+      activeBox->dim[i].max = Gecode::Int::Limits::min;
     }
 
     for (int i = 0; i < Objects->size(); i++) {
@@ -637,17 +674,23 @@ protected:
       }
 
       for (int i = 0; i < k; i++) {
-        f->dim[i].min = std::min(f->dim[i].min, o->x[i].min());
-        f->dim[i].max = std::max(f->dim[i].max, o->x[i].max() + o->l[i]);
+        activeBox->dim[i].min = std::min(activeBox->dim[i].min, o->x[i].min());
+        activeBox->dim[i].max = std::max(activeBox->dim[i].max, o->x[i].max() + o->l[i]);
       }
     }
 
     for (int i = 0; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
 
-      if (o->fixed && cantOverlap(f, o, k)) {
+      if (o->fixed && cantOverlap(activeBox, o, k)) {
         o->source = false; // TODO: this should be "two collections"!
       }
+    }
+
+    // Reset bounding box
+    for (int j = 0; j < k; j++) {
+      B->dim[j].min = Gecode::Int::Limits::infinity;
+      B->dim[j].max = Gecode::Int::Limits::min;
     }
 
     // If all objects are fixed and we have not failed, we can subsume
@@ -733,6 +776,14 @@ public:
 
     dimensions = 2;
 
+    B = (FR *) ((Space &) home).ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
+
+    for (int i = 0; i < dimensions; i++) {
+      // Make sure every rectangle is checked at first filtering
+      B->dim[i].min = Gecode::Int::Limits::min;
+      B->dim[i].max = Gecode::Int::Limits::infinity;
+    }
+
     Int::IntView::schedule(home, *this, Int::ME_INT_BND); // Schedule the propagator
     home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
   }
@@ -763,6 +814,14 @@ public:
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home, p.Objects->size());
 
+    B = (FR *) home.ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
+
+    for (int j = 0; j < dimensions; j++) {
+      // Reset bounding box
+      B->dim[j].min = Gecode::Int::Limits::infinity;
+      B->dim[j].max = Gecode::Int::Limits::min;
+    }
+
     maxl = ((Space&) home).alloc<int>(dimensions);
     
     for (int j = 0; j < dimensions; j++) {
@@ -772,6 +831,7 @@ public:
     for (int i = 0; i < p.Objects->size(); i++) {
       Object *pObj = p.Objects->collection[i];
       Object *o = ((Space&) home).alloc<Object>(1);
+
       o->fixed = pObj->fixed;
       o->source = pObj->source;
 
@@ -842,6 +902,12 @@ public:
           o->skippable--;
           a.skippable = false; // Don't decrement skippable counter more than once per dimension
         }
+      }
+
+      // Update bounding box B
+      for (int j = 0; j < dimensions; j++) {
+        B->dim[j].min = std::min(B->dim[j].min, o->x[j].min());
+        B->dim[j].max = std::max(B->dim[j].max, o->x[j].max() + o->l[j] - 1);
       }
 
       return ES_NOFIX; // Must schedule as bound was changed or view was assigned a value
