@@ -675,7 +675,7 @@ protected:
 
       for (int i = 0; i < k; i++) {
         activeBox->dim[i].min = std::min(activeBox->dim[i].min, o->x[i].min());
-        activeBox->dim[i].max = std::max(activeBox->dim[i].max, o->x[i].max() + o->l[i]);
+        activeBox->dim[i].max = std::max(activeBox->dim[i].max, o->x[i].max() + o->l[i] - 1);
       }
     }
 
