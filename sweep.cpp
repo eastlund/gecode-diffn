@@ -226,13 +226,13 @@ protected:
     return true;
   }
 
-  bool overlaps(FR *f, Object *o, int k) {
+  bool cantOverlap(FR *boundingBox, Object *o, int k) {
     for (int i = 0; i < k; i++) {
-      if ((o->x[i].max() < f->dim[i].min) || (o->x[i].min() > f->dim[i].max)) {
-        return false;
+      if ((o->x[i].max() + o->l[i] < boundingBox->dim[i].min) || (o->x[i].min() > boundingBox->dim[i].max)) {
+        return true;
       }
     }
-    return true;
+    return false;
   }
 
   // Generates relative FRs to the object o and stores them in F
@@ -469,9 +469,7 @@ protected:
       }
 
       ModEvent me = o->x[d].gq(home, c[d]); // prune o
-      if (me_failed(me)) {
-        return ES_FAILED; // TODO: can this happen? (think about holes)
-      } else if (me_modified(me)) {
+      if (me_modified(me)) {
         o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
@@ -552,9 +550,7 @@ protected:
       }
 
       ModEvent me = o->x[d].lq(home, c[d]); // prune o
-      if (me_failed(me)) {
-        return ES_FAILED;
-      } else if (me_modified(me)) {
+      if (me_modified(me)) {
         o->support_max[d * k + d] = o->x[d].max(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
@@ -649,7 +645,7 @@ protected:
     for (int i = 0; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
 
-      if (o->fixed && !overlaps(f, o, k)) {
+      if (o->fixed && cantOverlap(f, o, k)) {
         o->source = false; // TODO: this should be "two collections"!
       }
     }
