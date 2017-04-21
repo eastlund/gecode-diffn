@@ -228,6 +228,7 @@ protected:
     return true;
   }
 
+  // True iff o cannot intersect the boundingBox
   bool cantOverlap(FR *boundingBox, Object *o, int k) {
     for (int i = 0; i < k; i++) {
       if ((o->x[i].max() + o->l[i] < boundingBox->dim[i].min) || (o->x[i].min() > boundingBox->dim[i].max)) {
@@ -568,29 +569,27 @@ protected:
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
 
-    // TODO: allocate forbiddenregion collection here, initilise forbiddenregions-object with address to this area
+    // TODO: maybe allocate forbiddenregion collection here, initilise forbiddenregions-object with address to this area
     // It might be slower to create one region here however, since the scope will become quite large compared to one region per object, in SPP it seems that it is not worth it. "(keep scope of a region small)"
     // In instances with more objects it should be better to allocate once here however.
     // TODO: measure and test!
 
-    // Bounding box for temporary storage of information from external events
-    FR *externalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
-
-    for (int j = 0; j < k; j++) {
-      externalB->dim[j].min = B->dim[j].min;
-      externalB->dim[j].max = B->dim[j].max;
-
-      // Reset bounding box B to consider internal events within fixpoint loop
-      B->dim[j].min = Gecode::Int::Limits::infinity;
-      B->dim[j].max = Gecode::Int::Limits::min;
-    }
-
-    // Boolean indicating whether fixpoint-loop is on first iteration (needed for INCREMENTAL optimsation)
-    bool first = true;
+    // Bounding box for temporary storage of B
+    FR *internalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
 
     while (nonfix) {
       nonfix = false;
       allfixed = true;
+
+      for (int j = 0; j < k; j++) {
+        // Move values from B to internalB (so that B can be populated by internal events)
+        internalB->dim[j].min = B->dim[j].min;
+        internalB->dim[j].max = B->dim[j].max;
+        
+        // Reset bounding box B to consider internal events within fixpoint loop
+        B->dim[j].min = Gecode::Int::Limits::infinity;
+        B->dim[j].max = Gecode::Int::Limits::min;
+      }
 
       for (int i = 0; i < Objects->size(); i++) {
         Object *o = Objects->collection[i];
@@ -600,21 +599,11 @@ protected:
           continue;
         }
 
-        // INCREMENTAL: is o inside bounding box of modified objects?
-        if (first) {
-          if (cantOverlap(externalB, o, k)) { // Consider external events
-            if (!o->x.assigned()) {
-              allfixed = false;
-            }
-            continue; 
+        if (cantOverlap(internalB, o, k)) { // Consider external events
+          if (!o->x.assigned()) {
+            allfixed = false;
           }
-        } else {
-          if (cantOverlap(B, o, k)) { // Consider internal events. I.e., modifications made inside fixpoint loop 
-            if (!o->x.assigned()) {
-              allfixed = false;
-            }
-            continue; 
-          }
+          continue; 
         }
         
         Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
@@ -654,7 +643,6 @@ protected:
           o->fixed = true;
         }
       }
-      first = false; // First iteration done
     }
 
     Region r(home);
