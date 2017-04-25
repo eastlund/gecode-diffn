@@ -220,7 +220,7 @@ protected:
   
   Council<ViewAdvisor> c;
   
-  // True iff f and o overlap in dimension d
+  // True iff (min..max) and o overlap in dimension d
   bool overlaps(int min, int max, Object *o, int d) {
     if ((o->x[d].max() < min) || (o->x[d].min() > max)) {
       return false;
@@ -473,7 +473,6 @@ protected:
 
       ModEvent me = o->x[d].gq(home, c[d]); // prune o
       if (me_modified(me)) {
-        o->support_min[d * k + d] = o->x[d].min(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -554,7 +553,6 @@ protected:
 
       ModEvent me = o->x[d].lq(home, c[d]); // prune o
       if (me_modified(me)) {
-        o->support_max[d * k + d] = o->x[d].max(); // In case c[d] was in a hole
         return ES_NOFIX;
       } else {
         return ES_FIX;
@@ -623,7 +621,6 @@ protected:
                 return ES_FAILED;
               }
             }
-            F.resetRR(); // Reset RR position
             ExecStatus pMaxStatus = ES_FIX;
             if (!o->x[d].assigned()) {
               pMaxStatus = pruneMax(home, o, d, k, &F);
