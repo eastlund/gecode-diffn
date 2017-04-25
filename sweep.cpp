@@ -231,7 +231,7 @@ protected:
   // True iff o cannot intersect the boundingBox
   bool cantOverlap(FR *boundingBox, Object *o, int k) {
     for (int i = 0; i < k; i++) {
-      if ((o->x[i].max() + o->l[i] < boundingBox->dim[i].min) || (o->x[i].min() > boundingBox->dim[i].max)) {
+      if ((o->x[i].max() + o->l[i] - 1 < boundingBox->dim[i].min) || (o->x[i].min() > boundingBox->dim[i].max)) {
         return true;
       }
     }
@@ -682,6 +682,7 @@ protected:
     }
 
     // If all objects are fixed and we have not failed, we can subsume
+    // TODO: add check based on SOURCE-opt (if only 1 source then subsume)
     if (allfixed) {
       return home.ES_SUBSUMED(*this);
     }
