@@ -401,6 +401,25 @@ protected:
     return NULL; // return NULL if no infeasible FR was found
   }
 
+  // Adjust the sweep-point based on jump vector information
+  forceinline bool adjustUp(Object *o, int *c, int *n, int d, int k) {
+    bool b = false;// No new point to jump to yet (assume failure)
+
+    for (int j = k - 1; j >= 0; j--) {
+      int r = (j + d) % k;         // Consider rotation
+      c[r] = n[r];                 // Use n vector to jump
+      n[r] = o->x[r].max() + 1;    // Reset component of n after jumping
+      if (c[r] <= o->x[r].max()) { // Jump target found?
+        b = true;                  // target found
+        break;
+      } else {
+        c[r] = o->x[r].min();      // reset component of c, dimension r exhausted
+      }
+    }
+
+    return b;
+  }
+
   // Function for pruning the lower bound of object o in dimension d
   forceinline ExecStatus pruneMin(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
     // SUPPORT optimisation
@@ -442,25 +461,12 @@ protected:
     // While we have not failed and c is infeasible
     while (b and currentF) {
       // update jump-vector
-      for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
+      for (int i = 0; i < k; i++) {
         n[i] = std::min(n[i], currentF->dim[i].max + 1);
       }
       
-      b = false; // No new point to jump to yet (assume failure)
-      
-      // TODO: Abstract to adjust procedure
-      // Adjust the sweep-point based on jump vector information
-      for (int j = k - 1; j >= 0; j--) {
-        int r = (j + d) % k;         // Consider rotation
-        c[r] = n[r];                 // Use n vector to jump
-        n[r] = o->x[r].max() + 1;    // Reset component of n after jumping
-        if (c[r] <= o->x[r].max()) { // Jump target found?
-          b = true;                  // target found
-          break;
-        } else {
-          c[r] = o->x[r].min();      // reset component of c, dimension r exhausted
-        }
-      }
+      b = adjustUp(o, c, n, d, k);
+
       // Update currentF and check if it is infeasible still
       currentF = getFR(k, c, F);
     }
@@ -481,6 +487,25 @@ protected:
       return ES_FAILED;
     }
   }
+
+  forceinline bool adjustDown(Object *o, int *c, int *n, int d, int k) {
+    bool b = false; // No new point to jump to yet (assume failure)
+
+    for (int j = k - 1; j >= 0; j--) {
+      int r = (j + d) % k;
+      c[r] = n[r];                 // Use n vector to jump
+      n[r] = o->x[r].min() - 1;    // Reset component of n after jumping
+      if (c[r] >= o->x[r].min()) { // Jump target found?
+        b = true;                  // target found
+        break;
+      } else {
+        c[r] = o->x[r].max();      // reset component of c, dimension r exhausted
+      }
+    }
+
+    return b;
+  }
+
 
   // Function for pruning the upper bound of object o in dimension d
   forceinline ExecStatus pruneMax(Home home, Object *o, int d, int k, ForbiddenRegions *F) {
@@ -522,24 +547,11 @@ protected:
 
     // While we have not failed and c is infeasible
     while (b and currentF) {
-      for (int i = 0; i < k; i++) { // TODO: abstract to updatevector procedure
+      for (int i = 0; i < k; i++) {
         n[i] = std::max(n[i], currentF->dim[i].min - 1);
       }
 
-      b = false; // No new point to jump to yet (assume failure)
-      
-      // TODO: Abstract to adjust procedure
-      for (int j = k - 1; j >= 0; j--) {
-        int r = (j + d) % k;
-        c[r] = n[r];              // Use n vector to jump
-        n[r] = o->x[r].min() - 1;    // Reset component of n after jumping
-        if (c[r] >= o->x[r].min()) { // Jump target found?
-          b = true;               // target found
-          break;
-        } else {
-          c[r] = o->x[r].max();      // reset component of c, dimension r exhausted
-        }
-      }
+      b = adjustDown(o, c, n, d, k);
 
       // Update currentF and check if it is infeasible still
       currentF = getFR(k, c, F);
