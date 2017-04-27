@@ -92,7 +92,7 @@ public:
   FR* getTop();       // Get FR on top of FR stack
   void incTop();      // Increment the top of the stack
   void decTop();      // Decrement the top of the stack
-  ForbiddenRegions(Region&, int, int);
+  ForbiddenRegions(Region &r, int, int);
 };
 
 
@@ -193,6 +193,7 @@ protected:
   int dimensions; // Number of dimensions of the problem
 
   FR *B; // Bounding box for INCREMENTAL optimsation
+  bool inFilter; // Flag indacting if a bound was changed by filter or not
 
   int *maxl;
 
@@ -253,8 +254,8 @@ protected:
         bool exists = true; // Assume f exists
 
         for (int d = 0; d < k; d++) { // For every dimension d
-          const int min = other->x[d].max() - o->l[d] + 1;
-          const int max = other->x[d].min() + other->l[d] - 1;
+          const int min = other->rfrb[d] - o->l[d];
+          const int max = other->rfre[d];
           if ((min <= max) && overlaps(min, max, o, d)) {
             f->dim[d].min = min;
             f->dim[d].max = max;
@@ -576,13 +577,10 @@ protected:
 
   // R is a collection of rectangles participating in the problem
   forceinline ExecStatus filter(Space &home, int k) {
+    inFilter = true; // Entering filter - future bound changes are made by filter
+    
     bool nonfix = true;
     bool allfixed = true; // Used for detecting subsumption
-
-    // TODO: maybe allocate forbiddenregion collection here, initilise forbiddenregions-object with address to this area
-    // It might be slower to create one region here however, since the scope will become quite large compared to one region per object, in SPP it seems that it is not worth it. "(keep scope of a region small)"
-    // In instances with more objects it should be better to allocate once here however.
-    // TODO: measure and test!
 
     // Bounding box for temporary storage of B
     FR *internalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
@@ -615,10 +613,10 @@ protected:
           }
           continue; 
         }
-        
-        Region r(home); // TODO: one region per object or one for all objects? ("keep scope small")
+
+        Region r(home);
         ForbiddenRegions F(r, k, Objects->size()-1); 
-        genOutBoxesMerge(&F, Objects, k, o);
+        genOutBoxes(&F, Objects, k, o);
         
         if (o->x.assigned()) {
           if (F.size() > 0) { // If a FR exists, then o->x must be infeasible
@@ -690,6 +688,8 @@ protected:
       B->dim[j].max = Gecode::Int::Limits::min;
     }
 
+    inFilter = false; // Exiting filter - future bound changes are made externally
+
     // If all objects are fixed and we have not failed, we can subsume
     // TODO: add check based on SOURCE-opt (if only 1 source then subsume)
     if (allfixed) {
@@ -708,6 +708,8 @@ public:
   {
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home, x0.size());
+
+    inFilter = false;
 
     maxl = ((Space&) home).alloc<int>(2);
     maxl[0] = -1;
@@ -812,6 +814,8 @@ public:
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
     new(Objects) OBJECTS((Space &) home, p.Objects->size());
 
+    inFilter = false;
+
     B = (FR *) home.ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
 
     for (int j = 0; j < dimensions; j++) {
@@ -907,8 +911,9 @@ public:
         B->dim[j].min = std::min(B->dim[j].min, o->x[j].min());
         B->dim[j].max = std::max(B->dim[j].max, o->x[j].max() + o->l[j] - 1);
       }
-
-      return ES_NOFIX; // Must schedule as bound was changed or view was assigned a value
+      
+      // Only schedule if view was modified externally
+      return (inFilter == false) ? ES_NOFIX : ES_FIX;
     } else {
       return ES_FIX; // Don't schedule if no bound was changed
     }
@@ -916,7 +921,7 @@ public:
     
   // Perform propagation
   virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-    return filter((Home) home, dimensions); // TODO: fixing dimensions = 2 here gives performance boost
+    return filter(home, dimensions); // TODO: fixing dimensions = 2 here gives performance boost
   }
  
 };
