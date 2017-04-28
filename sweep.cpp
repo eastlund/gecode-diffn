@@ -652,6 +652,9 @@ protected:
       }
     }
 
+    // Free space for internalB so that it may be reused
+    home.rfree(internalB, sizeof(FR) + sizeof(Dim)*k);
+
     Region r(home);
     // activeBox is a bounding box for all non-fixed objects
     FR *activeBox = (FR *) r.ralloc((sizeof(FR) + sizeof(Dim)*k));
