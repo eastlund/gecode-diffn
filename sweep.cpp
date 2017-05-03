@@ -702,8 +702,8 @@ protected:
 public:
   // Create propagator and initialize
   Diffn(Home home, // Constructor for 2D
-        ViewArray<IntView>& x0,int w0[],
-        ViewArray<IntView>& y0,int h0[])
+        const IntVarArgs& x0,int w0[],
+        const IntVarArgs& y0,int h0[])
     : Propagator(home), c(home)
   {
     Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
@@ -793,8 +793,8 @@ public:
 
   // Post no-overlap propagator
   static ExecStatus post(Home home,
-                         ViewArray<IntView>& x, int w[],
-                         ViewArray<IntView>& y, int h[]) {
+                         const IntVarArgs& x, int w[],
+                         const IntVarArgs& y, int h[]) {
     // Only if there is something to propagate
     if (x.size() > 1)
       (void) new (home) Diffn(home,x,w,y,h);
@@ -956,9 +956,6 @@ void diffn(Home home,
     throw ArgumentSizeMismatch("nooverlap");
   // Never post a propagator in a failed space
   if (home.failed()) return;
-  // Set up array of views for the coordinates
-  ViewArray<IntView> vx(home,x);
-  ViewArray<IntView> vy(home,y);
   // Set up arrays (allocated in home) for width and height and initialize
   int* wc = static_cast<Space&>(home).alloc<int>(x.size());
   int* hc = static_cast<Space&>(home).alloc<int>(y.size());
@@ -966,7 +963,7 @@ void diffn(Home home,
     wc[i]=w[i]; hc[i]=h[i];
   }
   // If posting failed, fail space
-  if (Diffn::post(home,vx,wc,vy,hc) != ES_OK)
+  if (Diffn::post(home,x,wc,y,hc) != ES_OK)
     home.fail();
 }
 
