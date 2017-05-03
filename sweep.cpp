@@ -60,15 +60,11 @@ public:
   // Reference counter used in ENABLE optimisation, if > 0, then the
   // object can be skipped during relative FR generation
   int skippable;
-
-  // Boolean used in SEPARATE optimisation
-  bool fixed;
-
-  bool source;
   
   bool isSame(Object *);
 };
 
+forceinline
 bool Object::isSame(Object *o) {
   return id == o->id;
 }
@@ -162,6 +158,7 @@ public:
   int size();
   void insert(Object*, int i);
   void prettyPrint();
+  void removeLast();
 
   OBJECTS(Space &h, int l);
 };
@@ -182,6 +179,10 @@ forceinline int OBJECTS::size(void) {
   return length;
 }
 
+forceinline void OBJECTS::removeLast(void) {
+  length--;
+}
+
 forceinline void OBJECTS::insert(Object *f, int i) {
   collection[i] = f;
 }
@@ -195,7 +196,11 @@ protected:
   FR *B; // Bounding box for INCREMENTAL optimsation
   bool inFilter; // Flag indacting if a bound was changed by filter or not
 
-  int *maxl;
+  int pointerSize;
+  int *Pointers; // Pointers[id] denotes the index in Objects for object id
+  int pivot;
+
+  int *maxl; // The recorded maximum length of all objects
 
   class ViewAdvisor : public Advisor {
   public:
@@ -246,7 +251,7 @@ protected:
       Object *other = O->collection[i];
 
       if (!other->isSame(o)) { // For every object <> o
-        if (other->skippable > 0 || !other->source) { 
+        if (other->skippable > 0) { 
           continue;
         }
 
@@ -273,14 +278,15 @@ protected:
       }
     }
   }
-
-  /* Tries to coalesce f0 and f1.
+  
+    /* Tries to coalesce f0 and f1.
    * Return cases:
    * 0: coalescing not possible
    * 1: f0 includes f1 (completely overlaps) or one of the two can be extended in one dimension to represent both FRs,
    *    f0 is then changed in place to represent both.
    * 2: f1 includes f2 (completely overlaps)
    */
+  forceinline
   int coalesce(FR *f0, FR *f1, int k) {
     // TODO: introduce enumerator
     int trend = 0; // What case did the previous dimensions fullfil?
@@ -333,7 +339,7 @@ protected:
       Object *other = O->collection[i];
       
       if (!other->isSame(o)) { // For every other object <> o
-        if (other->skippable > 0 || !other->source) { 
+        if (other->skippable > 0) { 
           continue;
         }
 
@@ -578,16 +584,13 @@ protected:
   // R is a collection of rectangles participating in the problem
   forceinline ExecStatus filter(Space &home, int k) {
     inFilter = true; // Entering filter - future bound changes are made by filter
-    
     bool nonfix = true;
-    bool allfixed = true; // Used for detecting subsumption
 
     // Bounding box for temporary storage of B
     FR *internalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
 
     while (nonfix) {
       nonfix = false;
-      allfixed = true;
 
       for (int j = 0; j < k; j++) {
         // Move values from B to internalB (so that B can be populated by internal events)
@@ -599,18 +602,10 @@ protected:
         B->dim[j].max = Gecode::Int::Limits::min;
       }
 
-      for (int i = 0; i < Objects->size(); i++) {
+      for (int i = 0; i <= pivot; i++) {
         Object *o = Objects->collection[i];
 
-        // SEPARATE: if o is fixed and checked, then skip it.
-        if (o->fixed) {
-          continue;
-        }
-
         if (cantOverlap(internalB, o, k)) { // Consider external events
-          if (!o->x.assigned()) {
-            allfixed = false;
-          }
           continue; 
         }
 
@@ -644,11 +639,15 @@ protected:
           }
         }
 
-        if (!o->x.assigned()) {
-          allfixed = false;
-        } else {
-          o->fixed = true;
-        }
+        if (o->x.assigned()) {
+          // swap as o has become fixed (and checked)
+          Object *pivotObject = Objects->collection[pivot];
+          Objects->collection[i] = pivotObject;
+          Objects->collection[pivot] = o;
+          Pointers[pivotObject->id] = i; // Advisors for pivotObject now search at position i for pivotObject
+          pivot--; // Decrement pivot as one more object is now fixed
+          i--; // Decrement so we don't miss swapped object
+        } 
       }
     }
 
@@ -664,12 +663,8 @@ protected:
       activeBox->dim[j].max = Gecode::Int::Limits::min;
     }
 
-    for (int i = 0; i < Objects->size(); i++) {
+    for (int i = 0; i <= pivot; i++) {
       Object *o = Objects->collection[i];
-      
-      if (o->fixed || !o->source) {
-        continue;
-      }
 
       for (int j = 0; j < k; j++) {
         activeBox->dim[j].min = std::min(activeBox->dim[j].min, o->x[j].min());
@@ -677,11 +672,14 @@ protected:
       }
     }
 
-    for (int i = 0; i < Objects->size(); i++) {
+    for (int i = pivot + 1; i < Objects->size(); i++) {
       Object *o = Objects->collection[i];
 
-      if (o->fixed && o->source && cantOverlap(activeBox, o, k)) {
-        o->source = false; // TODO: this should be "two collections"!
+      if (cantOverlap(activeBox, o, k)) {
+        // Remove o from Objects
+        Objects->collection[i] = Objects->collection[Objects->size() - 1];
+        Objects->removeLast();
+        --i; // Must check new i!
       }
     }
 
@@ -694,8 +692,7 @@ protected:
     inFilter = false; // Exiting filter - future bound changes are made externally
 
     // If all objects are fixed and we have not failed, we can subsume
-    // TODO: add check based on SOURCE-opt (if only 1 source then subsume)
-    if (allfixed) {
+    if (pivot < 0) {
       return home.ES_SUBSUMED(*this);
     }
 
@@ -714,6 +711,10 @@ public:
 
     inFilter = false;
 
+    pivot = x0.size()-1; // Everything to the right of pivot is fixed
+    pointerSize = x0.size();
+    Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
+
     maxl = ((Space&) home).alloc<int>(2);
     maxl[0] = -1;
     maxl[1] = -1;
@@ -721,8 +722,6 @@ public:
     // Create corresponding objects for the ViewArrays and arrays
     for (int i = 0; i < x0.size(); i++) {
       Object *o = ((Space&) home).alloc<Object>(1);
-      o->fixed = false;
-      o->source = true;
 
       o->l = ((Space&) home).alloc<int>(2);
       o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
@@ -759,6 +758,7 @@ public:
       o->skippable = 2; // Assume skippable in both dimensions
 
       Objects->insert(o, i);
+      Pointers[i] = i;
     }
 
     /* Need to calculate skippable here since maxl is not calculated fully above */
@@ -819,6 +819,10 @@ public:
 
     inFilter = false;
 
+    pivot = p.pivot;
+    pointerSize = p.pointerSize;
+    Pointers = (int*)((Space &) home).ralloc(sizeof(int)*p.pointerSize);
+
     B = (FR *) home.ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
 
     for (int j = 0; j < dimensions; j++) {
@@ -833,43 +837,45 @@ public:
       maxl[j] = p.maxl[j];
     }
 
+    for (int i = 0; i < p.pointerSize; i++) {
+      Pointers[i] = p.Pointers[i];
+    }
+
+
     for (int i = 0; i < p.Objects->size(); i++) {
       Object *pObj = p.Objects->collection[i];
       Object *o = ((Space&) home).alloc<Object>(1);
 
-      o->fixed = pObj->fixed;
-      o->source = pObj->source;
+      o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
+      o->rfre = &(o->l[dimensions]);
+      o->rfrb = &(o->rfre[dimensions]);
 
-      // Only copy if o is still a source object
-      if (o->source) {
-        o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
-        o->rfre = &(o->l[dimensions]);
-        o->rfrb = &(o->rfre[dimensions]);
-      
-        for (int j = 0; j < dimensions; j++) {
-          o->l[j] = pObj->l[j];
-          o->rfre[j] = pObj->rfre[j];
-          o->rfrb[j] = pObj->rfrb[j];
-        }
-      }
-
-      // Only copy support if the object is not fixed
-      if (!o->fixed) {
-        o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-        o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-        
-        for (int j = 0; j < dimensions; j++) {
-          for (int d = 0; d < dimensions; d++) {
-            o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
-            o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
-          }
-        }
+      for (int j = 0; j < dimensions; j++) {
+        o->l[j] = pObj->l[j];
+        o->rfre[j] = pObj->rfre[j];
+        o->rfrb[j] = pObj->rfrb[j];
       }
 
       o->x.update(home, share, pObj->x);
       o->skippable = pObj->skippable;
       o->id = pObj->id;
       Objects->insert(o, i);
+    }
+
+    // Only copy support if the object is not fixed
+    for (int i = 0; i <= pivot; i++) {
+      Object *pObj = p.Objects->collection[i];
+      Object *o = Objects->collection[i];
+      
+      o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+      o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+      
+      for (int j = 0; j < dimensions; j++) {
+        for (int d = 0; d < dimensions; d++) {
+          o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
+          o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
+        }
+      }
     }
 
     c.update(home, share, p.c);
@@ -896,7 +902,7 @@ public:
     if (me == ME_INT_BND || me == ME_INT_VAL) {
       ViewAdvisor& a = static_cast<ViewAdvisor&>(_a);
       int dim = a.dim;
-      Object *o = Objects->collection[a.i];
+      Object *o = Objects->collection[Pointers[a.i]];
       
       // update values since view changed
       o->rfrb[dim] = o->x[dim].max() + 1; 
@@ -915,8 +921,13 @@ public:
         B->dim[j].max = std::max(B->dim[j].max, o->x[j].max() + o->l[j] - 1);
       }
       
-      // Only schedule if view was modified externally
-      return (inFilter == false) ? ES_NOFIX : ES_FIX;
+      if (me == ME_INT_VAL) {
+        // Dispose advisor as its view became fixed
+        return (inFilter == false) ? home.ES_NOFIX_DISPOSE(c, a) : home.ES_FIX_DISPOSE(c, a);
+      } else {
+        // Only schedule if view was modified externally
+        return (inFilter == false) ? ES_NOFIX : ES_FIX;
+      }
     } else {
       return ES_FIX; // Don't schedule if no bound was changed
     }
