@@ -33,16 +33,16 @@ using namespace Gecode::Int;
 
 /* The Dim struct represents a minimum and maximum value in a given
    dimension */
-typedef struct dim {
+struct Dim {
   int min;
   int max;
-} Dim;
+};
 
 /* The FR struct represents forbidden regions consisting of k
    dimensions, each dimension containing min and max of the FR */
-typedef struct fr {
+struct FR {
   Dim dim[];
-} FR;
+};
 
 /* The Object class represents a hyperrectangle object */
 class Object {
