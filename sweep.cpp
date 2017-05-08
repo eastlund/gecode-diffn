@@ -55,10 +55,6 @@ namespace Diffn {
     int *support_min; // 1D matrix representation for keeping track of supported points for pruneMin
     int *support_max; // 1D matrix representation for keeping track of supported points for pruneMax
   
-    // Arrays used in ADVISOR optimisation
-    int *rfrb;
-    int *rfre;
-
     // Reference counter used in ENABLE optimisation, if > 0, then the
     // object can be skipped during relative FR generation
     int skippable;
@@ -261,8 +257,8 @@ namespace Diffn {
           bool exists = true; // Assume f exists
 
           for (int d = 0; d < k; d++) { // For every dimension d
-            const int min = other->rfrb[d] - o->l[d];
-            const int max = other->rfre[d];
+            const int min = other->x[d].max() - o->l[d] + 1;
+            const int max = other->x[d].min() + other->l[d] - 1;
             if ((min <= max) && overlaps(min, max, o, d)) {
               f->dim[d].min = min;
               f->dim[d].max = max;
@@ -350,8 +346,8 @@ namespace Diffn {
           bool exists = true; // Assume f exists
 
           for (int d = 0; d < k; d++) { // For every dimension d
-            const int min = other->rfrb[d] - o->l[d];
-            const int max = other->rfre[d];
+            const int min = other->x[d].max() - o->l[d] + 1;
+            const int max = other->x[d].min() + other->l[d] - 1;
             if ((min <= max) && overlaps(min, max, o, d)) {
               f->dim[d].min = min;
               f->dim[d].max = max;
@@ -749,14 +745,6 @@ namespace Diffn {
         o->support_max[2] = o->x[0].max();
         o->support_max[3] = o->x[1].max();
 
-        o->rfre = ((Space&) home).alloc<int>(2*2);
-        o->rfrb = &(o->rfre[2]);
-
-        o->rfrb[0] = o->x[0].max() + 1;
-        o->rfre[0] = o->x[0].min() + o->l[0] - 1;
-        o->rfrb[1] = o->x[1].max() + 1;
-        o->rfre[1] = o->x[1].min() + o->l[1] - 1;
-
         o->skippable = 2; // Assume skippable in both dimensions
 
         Objects->insert(o, i);
@@ -769,7 +757,7 @@ namespace Diffn {
         bool tmp[2] = {true, true}; // tmp[i] = true iff o is skippable in dimension i
 
         for (int j = 0; j < 2; j++) {
-          if (not (o->rfrb[j] - o->rfre[j] > maxl[j])) {
+            if (not (o->x[j].max() - o->x[j].min() - o->l[j] > maxl[j] - 2)) {
             o->skippable--;
             tmp[j] = false;
           }
@@ -848,14 +836,10 @@ namespace Diffn {
         Object *pObj = p.Objects->collection[i];
         Object *o = ((Space&) home).alloc<Object>(1);
 
-        o->l = home.alloc<int>(dimensions*3); // Make sure memory block fits 2 more arrays of identical size
-        o->rfre = &(o->l[dimensions]);
-        o->rfrb = &(o->rfre[dimensions]);
+        o->l = home.alloc<int>(dimensions);
 
         for (int j = 0; j < dimensions; j++) {
           o->l[j] = pObj->l[j];
-          o->rfre[j] = pObj->rfre[j];
-          o->rfrb[j] = pObj->rfrb[j];
         }
 
         o->x.update(home, share, pObj->x);
@@ -906,12 +890,8 @@ namespace Diffn {
         int dim = a.dim;
         Object *o = Objects->collection[Pointers[a.i]];
       
-        // update values since view changed
-        o->rfrb[dim] = o->x[dim].max() + 1; 
-        o->rfre[dim] = o->x[dim].min() + o->l[dim] - 1;
-    
         if (a.skippable) {
-          if (not (o->rfrb[dim] - o->rfre[dim] > maxl[dim])) {
+          if (not (o->x[dim].max() - o->x[dim].min() - o->l[dim] > maxl[dim] - 2)) {
             o->skippable--;
             a.skippable = false; // Don't decrement skippable counter more than once per dimension
           }
