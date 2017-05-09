@@ -58,6 +58,9 @@ namespace Diffn {
     // Reference counter used in ENABLE optimisation, if > 0, then the
     // object can be skipped during relative FR generation
     int skippable;
+
+    // Boolean used in SEPARATE optimisation
+    bool fixed;
   
     bool isSame(Object *);
   };
@@ -196,7 +199,6 @@ namespace Diffn {
 
     int pointerSize;
     int *Pointers; // Pointers[id] denotes the index in Objects for object id
-    int pivot;
 
     int *maxl; // The recorded maximum length of all objects
 
@@ -582,13 +584,16 @@ namespace Diffn {
     // R is a collection of rectangles participating in the problem
     forceinline ExecStatus filter(Space &home, int k) {
       inFilter = true; // Entering filter - future bound changes are made by filter
+
       bool nonfix = true;
+      bool allfixed = true; // Used for detecting subsumption
 
       // Bounding box for temporary storage of B
       FR *internalB = (FR *) home.ralloc(sizeof(FR) + sizeof(Dim)*k);
 
       while (nonfix) {
         nonfix = false;
+        allfixed = true;
 
         for (int j = 0; j < k; j++) {
           // Move values from B to internalB (so that B can be populated by internal events)
@@ -600,10 +605,13 @@ namespace Diffn {
           B->dim[j].max = Gecode::Int::Limits::min;
         }
 
-        for (int i = 0; i <= pivot; i++) {
+        for (int i = 0; i < Objects->size(); i++) {
           Object *o = Objects->collection[i];
 
           if (cantOverlap(internalB, o, k)) { // Consider external events
+            if (!o->x.assigned()) {
+              allfixed = false;
+            }
             continue; 
           }
 
@@ -635,17 +643,13 @@ namespace Diffn {
                 nonfix = true;
               }
             }
-          }
-
-          if (o->x.assigned()) {
-            // swap as o has become fixed (and checked)
-            Object *pivotObject = Objects->collection[pivot];
-            Objects->collection[i] = pivotObject;
-            Objects->collection[pivot] = o;
-            Pointers[pivotObject->id] = i; // Advisors for pivotObject now search at position i for pivotObject
-            pivot--; // Decrement pivot as one more object is now fixed
-            i--; // Decrement so we don't miss swapped object
           } 
+
+          if (!o->x.assigned()) {
+            allfixed = false;
+          } else {
+            o->fixed = true;
+          }
         }
       }
 
@@ -661,8 +665,12 @@ namespace Diffn {
         activeBox->dim[j].max = Gecode::Int::Limits::min;
       }
 
-      for (int i = 0; i <= pivot; i++) {
+      for (int i = 0; i < Objects->size(); i++) {
         Object *o = Objects->collection[i];
+
+        if (o->fixed) {
+          continue;
+        }
 
         for (int j = 0; j < k; j++) {
           activeBox->dim[j].min = std::min(activeBox->dim[j].min, o->x[j].min());
@@ -670,12 +678,13 @@ namespace Diffn {
         }
       }
 
-      for (int i = pivot + 1; i < Objects->size(); i++) {
+      for (int i = 0; i < Objects->size(); i++) {
         Object *o = Objects->collection[i];
 
-        if (cantOverlap(activeBox, o, k)) {
+        if (o->fixed && cantOverlap(activeBox, o, k)) {
           // Remove o from Objects
           Objects->collection[i] = Objects->collection[Objects->size() - 1];
+          Pointers[Objects->collection[i]->id] = i; // Advisors for moved objects now search at position i for it
           Objects->removeLast();
           --i; // Must check new i!
         }
@@ -690,7 +699,7 @@ namespace Diffn {
       inFilter = false; // Exiting filter - future bound changes are made externally
 
       // If all objects are fixed and we have not failed, we can subsume
-      if (pivot < 0) {
+      if (allfixed) {
         return home.ES_SUBSUMED(*this);
       }
 
@@ -709,7 +718,6 @@ namespace Diffn {
 
       inFilter = false;
 
-      pivot = x0.size()-1; // Everything to the right of pivot is fixed
       pointerSize = x0.size();
       Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
 
@@ -720,6 +728,7 @@ namespace Diffn {
       // Create corresponding objects for the ViewArrays and arrays
       for (int i = 0; i < x0.size(); i++) {
         Object *o = ((Space&) home).alloc<Object>(1);
+        o->fixed = false;
 
         o->l = ((Space&) home).alloc<int>(2);
         o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
@@ -809,7 +818,6 @@ namespace Diffn {
 
       inFilter = false;
 
-      pivot = p.pivot;
       pointerSize = p.pointerSize;
       Pointers = (int*)((Space &) home).ralloc(sizeof(int)*p.pointerSize);
 
@@ -836,32 +844,30 @@ namespace Diffn {
         Object *pObj = p.Objects->collection[i];
         Object *o = ((Space&) home).alloc<Object>(1);
 
+        o->fixed = pObj->fixed;
+
         o->l = home.alloc<int>(dimensions);
 
         for (int j = 0; j < dimensions; j++) {
           o->l[j] = pObj->l[j];
         }
 
+        if (!o->fixed) {
+          o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+          o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
+        
+          for (int j = 0; j < dimensions; j++) {
+            for (int d = 0; d < dimensions; d++) {
+              o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
+              o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
+            }
+          }
+        }
+
         o->x.update(home, share, pObj->x);
         o->skippable = pObj->skippable;
         o->id = pObj->id;
         Objects->insert(o, i);
-      }
-
-      // Only copy support if the object is not fixed
-      for (int i = 0; i <= pivot; i++) {
-        Object *pObj = p.Objects->collection[i];
-        Object *o = Objects->collection[i];
-      
-        o->support_min = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-        o->support_max = (int *) home.ralloc(sizeof(int) * dimensions * dimensions); // 1D representation of matrix
-      
-        for (int j = 0; j < dimensions; j++) {
-          for (int d = 0; d < dimensions; d++) {
-            o->support_min[j * dimensions + d] = pObj->support_min[j * dimensions + d];
-            o->support_max[j * dimensions + d] = pObj->support_max[j * dimensions + d];
-          }
-        }
       }
 
       c.update(home, share, p.c);
