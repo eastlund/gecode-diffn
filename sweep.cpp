@@ -608,6 +608,11 @@ namespace Diffn {
         for (int i = 0; i < Objects->size(); i++) {
           Object *o = Objects->collection[i];
 
+          // SEPARATE: if o is fixed and checked, then skip it.
+          if (o->fixed) {
+            continue;
+          }
+
           if (cantOverlap(internalB, o, k)) { // Consider external events
             if (!o->x.assigned()) {
               allfixed = false;
