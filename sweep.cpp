@@ -74,8 +74,8 @@ namespace Diffn {
      and retrieving them using RR scheduling */
   class ForbiddenRegions {
   private:
-    int RRpos;          // Current RR position in GetFR
     int length;         // Amount of FRs in collection
+    int RRpos;          // Current RR position in GetFR
     int dimensions;     // Number of dimensions used
   public:
     FR* collection;     // Collection stores FRs in place
