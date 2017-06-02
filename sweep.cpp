@@ -204,7 +204,6 @@ namespace Diffn {
 
     class ViewAdvisor : public Advisor {
     public:
-      //Int::IntView x;
       int dim; // What dimension in the corresponding viewarray is this advisor responsible for?
       int i; // The corresponding object
       bool skippable; // ENABLE optimisation: is the corresponding object skippable in this dimension?
@@ -224,7 +223,7 @@ namespace Diffn {
       }
     };
   
-    Council<ViewAdvisor> c;
+    Council<ViewAdvisor> c; // Council for storing the advisors
   
     // True iff (min..max) and o overlap in dimension d
     bool overlaps(int min, int max, Object *o, int d) {
@@ -620,9 +619,9 @@ namespace Diffn {
             continue; 
           }
 
-          Region r(home);
+          Region r(home); // Region for storing forbidden regions
           ForbiddenRegions F(r, k, Objects->size()-1); 
-          genOutBoxes(&F, Objects, k, o);
+          genOutBoxes(&F, Objects, k, o); // Replace with genOutBoxesMerge to use MERGE optimisation
         
           if (o->x.assigned()) {
             if (F.size() > 0) { // If a FR exists, then o->x must be infeasible
@@ -903,7 +902,7 @@ namespace Diffn {
       
         if (a.skippable) {
           if (not (o->x[dim].max() - o->x[dim].min() - o->l[dim] > maxl[dim] - 2)) {
-            o->skippable--;
+            o->skippable--; // o is no longer skippable in one of its dimensions
             a.skippable = false; // Don't decrement skippable counter more than once per dimension
           }
         }
@@ -928,7 +927,7 @@ namespace Diffn {
     
     // Perform propagation
     virtual ExecStatus propagate(Space& home, const ModEventDelta&) {
-      return filter(home, dimensions); // TODO: fixing dimensions = 2 here gives performance boost
+      return filter(home, dimensions);
     }
  
   };
