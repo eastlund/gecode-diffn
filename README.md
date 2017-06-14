@@ -38,7 +38,7 @@ Include the file `sweep.cpp` in a constraint programming model written in Gecode
 Include the file `sweep.cpp` in a constraint programming model written in Gecode and call `diffn(home, x, l, k)`, where:
 
 * `x`: IntVarArgs represent the origin coordinates of the hyperrectangle (defined as the lexicographically smallest point). Here, hyperrectangle object *i* is represented by the coordinates `x[i*k]`, `x[i*k+1]`, .., `x[i*k+k]`. Where `x[i*k]` represents *i*'s coordinate in dimension 0 (or x), `x[i*k+1]` its coordinate in dimension 1 (or y) etc.
-* `l`: IntArgs represent the side-length of the hyperrectangles. Here, the side-lengths of a hyperrectangle object *i* is represented by the values `l[i*k]`, `l[i*k+1]`, .., `i[i*k+k]`. 
+* `l`: IntArgs represent the side-length of the hyperrectangles. Here, the side-lengths of a hyperrectangle object *i* is represented by the values `l[i*k]`, `l[i*k+1]`, .., `l[i*k+k]`. 
 * `k`: Int represents the dimensionality of the hyperrectangles.
 
 # Report
