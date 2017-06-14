@@ -711,12 +711,12 @@ namespace Diffn {
     }
 
   public:
-    // Create propagator and initialize
-    Diffn(Home home, // Constructor for 2D
-          const IntVarArgs& x0,int w0[],
-          const IntVarArgs& y0,int h0[])
+        // Create propagator and initialize
+    Diffn(Home home, // Constructor for 1D
+          const IntVarArgs& x0,int w0[])
       : Propagator(home), c(home)
     {
+      dimensions = 1;
       Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
       new(Objects) OBJECTS((Space &) home, x0.size());
 
@@ -725,7 +725,78 @@ namespace Diffn {
       pointerSize = x0.size();
       Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
 
-      maxl = ((Space&) home).alloc<int>(2);
+      maxl = ((Space&) home).alloc<int>(dimensions);
+      maxl[0] = -1;
+
+      // Create corresponding objects for the ViewArrays and arrays
+      for (int i = 0; i < x0.size(); i++) {
+        Object *o = ((Space&) home).alloc<Object>(1);
+        o->fixed = false;
+
+        o->l = ((Space&) home).alloc<int>(dimensions);
+        o->support_min = (int *)((Space&) home).ralloc(sizeof(int));
+        o->support_max = (int *)((Space&) home).ralloc(sizeof(int));
+        o->x = ViewArray<IntView>((Space&) home, dimensions);
+
+        o->x[0] = x0[i];
+        o->l[0] = w0[i];
+        o->id = i;
+
+        maxl[0] = std::max(maxl[0], o->l[0]);
+
+        o->support_min[0] = o->x[0].min(); // TODO: doublecheck
+
+        o->support_max[0] = o->x[0].max();
+
+        o->skippable = dimensions; // Assume skippable in all dimensions
+
+        Objects->insert(o, i);
+        Pointers[i] = i;
+      }
+
+      /* Need to calculate skippable here since maxl is not calculated fully above */
+      for (int i = 0; i < x0.size(); i++) {
+        Object *o = Objects->collection[i];
+        bool tmp[1] = {true}; // tmp[i] = true iff o is skippable in dimension i
+
+        for (int j = 0; j < dimensions; j++) {
+            if (not (o->x[j].max() - o->x[j].min() - o->l[j] > maxl[j] - 2)) {
+            o->skippable--;
+            tmp[j] = false;
+          }
+        }
+
+        o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i,tmp[0]));
+      }
+
+      B = (FR *) ((Space &) home).ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
+
+      for (int i = 0; i < dimensions; i++) {
+        // Make sure every rectangle is checked at first filtering
+        B->dim[i].min = Gecode::Int::Limits::min;
+        B->dim[i].max = Gecode::Int::Limits::infinity;
+      }
+
+      Int::IntView::schedule(home, *this, Int::ME_INT_BND); // Schedule the propagator
+      home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
+    }
+
+    // Create propagator and initialize
+    Diffn(Home home, // Constructor for 2D
+          const IntVarArgs& x0,int w0[],
+          const IntVarArgs& y0,int h0[])
+      : Propagator(home), c(home)
+    {
+      dimensions = 2;
+      Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
+      new(Objects) OBJECTS((Space &) home, x0.size());
+
+      inFilter = false;
+
+      pointerSize = x0.size();
+      Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
+
+      maxl = ((Space&) home).alloc<int>(dimensions);
       maxl[0] = -1;
       maxl[1] = -1;
 
@@ -734,10 +805,10 @@ namespace Diffn {
         Object *o = ((Space&) home).alloc<Object>(1);
         o->fixed = false;
 
-        o->l = ((Space&) home).alloc<int>(2);
-        o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
-        o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * 2 * 2);
-        o->x = ViewArray<IntView>((Space&) home, 2);
+        o->l = ((Space&) home).alloc<int>(dimensions);
+        o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->x = ViewArray<IntView>((Space&) home, dimensions);
 
         o->x[0] = x0[i];
         o->x[1] = y0[i];
@@ -758,7 +829,7 @@ namespace Diffn {
         o->support_max[2] = o->x[0].max();
         o->support_max[3] = o->x[1].max();
 
-        o->skippable = 2; // Assume skippable in both dimensions
+        o->skippable = dimensions; // Assume skippable in all dimensions
 
         Objects->insert(o, i);
         Pointers[i] = i;
@@ -769,7 +840,7 @@ namespace Diffn {
         Object *o = Objects->collection[i];
         bool tmp[2] = {true, true}; // tmp[i] = true iff o is skippable in dimension i
 
-        for (int j = 0; j < 2; j++) {
+        for (int j = 0; j < dimensions; j++) {
             if (not (o->x[j].max() - o->x[j].min() - o->l[j] > maxl[j] - 2)) {
             o->skippable--;
             tmp[j] = false;
@@ -779,8 +850,6 @@ namespace Diffn {
         o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i,tmp[0]));
         o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i,tmp[1]));
       }
-
-      dimensions = 2;
 
       B = (FR *) ((Space &) home).ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
 
@@ -794,13 +863,125 @@ namespace Diffn {
       home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
     }
 
-    // Post no-overlap propagator
+    // Create propagator and initialize
+    Diffn(Home home, // Constructor for 3D
+          const IntVarArgs& x0,int w0[],
+          const IntVarArgs& y0,int h0[],
+          const IntVarArgs& z0,int l0[])
+      : Propagator(home), c(home)
+    {
+      dimensions = 3;
+      Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
+      new(Objects) OBJECTS((Space &) home, x0.size());
+
+      inFilter = false;
+
+      pointerSize = x0.size();
+      Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
+
+      maxl = ((Space&) home).alloc<int>(dimensions);
+      maxl[0] = -1;
+      maxl[1] = -1;
+      maxl[2] = -1;
+
+      // Create corresponding objects for the ViewArrays and arrays
+      for (int i = 0; i < x0.size(); i++) {
+        Object *o = ((Space&) home).alloc<Object>(1);
+        o->fixed = false;
+
+        o->l = ((Space&) home).alloc<int>(2);
+        o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->x = ViewArray<IntView>((Space&) home, dimensions);
+
+        o->x[0] = x0[i];
+        o->x[1] = y0[i];
+        o->x[2] = z0[i];
+        o->l[0] = w0[i];
+        o->l[1] = h0[i];
+        o->l[2] = l0[i];
+        o->id = i;
+
+        maxl[0] = std::max(maxl[0], o->l[0]);
+        maxl[1] = std::max(maxl[1], o->l[1]);
+        maxl[2] = std::max(maxl[2], o->l[2]);
+
+        o->support_min[0] = o->x[0].min();
+        o->support_min[1] = o->x[1].min();
+        o->support_min[2] = o->x[2].min();
+        o->support_min[3] = o->x[0].min();
+        o->support_min[4] = o->x[1].min();
+        o->support_min[5] = o->x[2].min();
+
+        o->support_max[0] = o->x[0].max();
+        o->support_max[1] = o->x[1].max();
+        o->support_max[2] = o->x[2].max();
+        o->support_max[3] = o->x[0].max();
+        o->support_max[4] = o->x[1].max();
+        o->support_max[5] = o->x[2].max();
+
+        o->skippable = dimensions; // Assume skippable in all dimensions
+
+        Objects->insert(o, i);
+        Pointers[i] = i;
+      }
+
+      /* Need to calculate skippable here since maxl is not calculated fully above */
+      for (int i = 0; i < x0.size(); i++) {
+        Object *o = Objects->collection[i];
+        bool tmp[3] = {true, true, true}; // tmp[i] = true iff o is skippable in dimension i
+
+        for (int j = 0; j < dimensions; j++) {
+            if (not (o->x[j].max() - o->x[j].min() - o->l[j] > maxl[j] - 2)) {
+            o->skippable--;
+            tmp[j] = false;
+          }
+        }
+
+        o->x[0].subscribe(home,*new (home) ViewAdvisor(home,*this,c,0,i,tmp[0]));
+        o->x[1].subscribe(home,*new (home) ViewAdvisor(home,*this,c,1,i,tmp[1]));
+        o->x[2].subscribe(home,*new (home) ViewAdvisor(home,*this,c,2,i,tmp[2]));
+      }
+
+      B = (FR *) ((Space &) home).ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
+
+      for (int i = 0; i < dimensions; i++) {
+        // Make sure every rectangle is checked at first filtering
+        B->dim[i].min = Gecode::Int::Limits::min;
+        B->dim[i].max = Gecode::Int::Limits::infinity;
+      }
+
+      Int::IntView::schedule(home, *this, Int::ME_INT_BND); // Schedule the propagator
+      home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
+    }
+
+    // Post 1D diffn propagator
+    static ExecStatus post(Home home,
+                           const IntVarArgs& x, int w[]) {
+      // Only if there is something to propagate
+      if (x.size() > 1)
+        (void) new (home) Diffn(home,x,w);
+      return ES_OK;
+    }
+
+    // Post 2D diffn propagator
     static ExecStatus post(Home home,
                            const IntVarArgs& x, int w[],
                            const IntVarArgs& y, int h[]) {
       // Only if there is something to propagate
       if (x.size() > 1)
         (void) new (home) Diffn(home,x,w,y,h);
+      return ES_OK;
+    }
+
+    // Post 3D diffn propagator
+    static ExecStatus post(Home home,
+                           const IntVarArgs& x, int w[],
+                           const IntVarArgs& y, int h[],
+                           const IntVarArgs& z, int l[]) {
+      // Only if there is something to propagate
+      if (x.size() > 1)
+        (void) new (home) Diffn(home,x,w,y,h,z,l);
       return ES_OK;
     }
 
@@ -932,6 +1113,27 @@ namespace Diffn {
  
   };
 
+}
+
+/*
+ * Post the constraint that the rectangles defined by the coordinates
+ * x and y and width w and height h do not overlap.
+ */
+void diffn(Home home,
+           const IntVarArgs& x, const IntArgs& w) {
+  // Check whether the arguments make sense
+  if (x.size() != w.size())
+    throw ArgumentSizeMismatch("nooverlap");
+  // Never post a propagator in a failed space
+  if (home.failed()) return;
+  // Set up arrays (allocated in home) for width and height and initialize
+  int* wc = static_cast<Space&>(home).alloc<int>(x.size());
+  for (int i=x.size(); i--; ) {
+    wc[i]=w[i];
+  }
+  // If posting failed, fail space
+  if (Diffn::Diffn::post(home,x,wc) != ES_OK)
+    home.fail();
 }
 
 /*
