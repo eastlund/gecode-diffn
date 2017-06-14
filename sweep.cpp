@@ -955,6 +955,86 @@ namespace Diffn {
       home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
     }
 
+    // Create propagator and initialize
+    Diffn(Home home, // Constructor for k-dimensions
+          const IntVarArgs& x0, int l0[], 
+          int k)
+      : Propagator(home), c(home)
+    {
+      dimensions = k;
+      int numObjects = x0.size() / dimensions; // |x0| must always be divisable by dimensions (for this constructor)
+
+      Objects = (OBJECTS*)((Space &) home).ralloc(sizeof(OBJECTS));
+      new(Objects) OBJECTS((Space &) home, numObjects);
+
+      inFilter = false;
+
+      pointerSize = numObjects;
+      Pointers = (int*)((Space &) home).ralloc(sizeof(int)*pointerSize);
+
+      maxl = ((Space&) home).alloc<int>(dimensions);
+      for (int j = 0; j < dimensions; j++) {
+        maxl[j] = -1;
+      }
+
+      // Create corresponding objects for the ViewArrays and arrays
+      for (int i = 0; i < numObjects; i++) { 
+        Object *o = ((Space&) home).alloc<Object>(1);
+        o->fixed = false;
+
+        o->l = ((Space&) home).alloc<int>(dimensions);
+        o->support_min = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->support_max = (int *)((Space&) home).ralloc(sizeof(int) * dimensions * dimensions);
+        o->x = ViewArray<IntView>((Space&) home, dimensions);
+
+        for (int j = 0; j < dimensions; j++) {
+          o->x[j] = x0[i*dimensions + j];
+          o->l[j] = l0[i*dimensions + j];
+          maxl[j] = std::max(maxl[j], o->l[j]);
+        }
+
+        o->id = i;
+
+        for (int j = 0; j < dimensions; j++) {
+          o->support_min[j] = o->x[j].min();
+          o->support_min[j+dimensions] = o->x[j].min();
+
+          o->support_max[j] = o->x[j].max();
+          o->support_max[j+dimensions] = o->x[j].max();
+        }
+
+        o->skippable = dimensions; // Assume skippable in all dimensions
+
+        Objects->insert(o, i);
+        Pointers[i] = i;
+      }
+
+      /* Need to calculate skippable here since maxl is not calculated fully above */
+      for (int i = 0; i < numObjects; i++) {
+        Object *o = Objects->collection[i];
+
+        for (int j = 0; j < dimensions; j++) {
+          bool advisorSkippable = true; // assume skippable
+          if (not (o->x[j].max() - o->x[j].min() - o->l[j] > maxl[j] - 2)) {
+            o->skippable--;
+            advisorSkippable = false;
+          }
+          o->x[j].subscribe(home,*new (home) ViewAdvisor(home,*this,c,j,i,advisorSkippable));
+        }
+      }
+
+      B = (FR *) ((Space &) home).ralloc((sizeof(FR) + sizeof(Dim)*dimensions));
+
+      for (int i = 0; i < dimensions; i++) {
+        // Make sure every rectangle is checked at first filtering
+        B->dim[i].min = Gecode::Int::Limits::min;
+        B->dim[i].max = Gecode::Int::Limits::infinity;
+      }
+
+      Int::IntView::schedule(home, *this, Int::ME_INT_BND); // Schedule the propagator
+      home.notice(*this, AP_DISPOSE); // Make sure dispose function is called on Space destruction
+    }
+
     // Post 1D diffn propagator
     static ExecStatus post(Home home,
                            const IntVarArgs& x, int w[]) {
@@ -982,6 +1062,16 @@ namespace Diffn {
       // Only if there is something to propagate
       if (x.size() > 1)
         (void) new (home) Diffn(home,x,w,y,h,z,l);
+      return ES_OK;
+    }
+
+    // Post 3D diffn propagator
+    static ExecStatus post(Home home,
+                           const IntVarArgs& x, int l[],
+                           int k) {
+      // Only if there is something to propagate
+      if (x.size() > 1)
+        (void) new (home) Diffn(home,x,l,k);
       return ES_OK;
     }
 
@@ -1116,8 +1206,8 @@ namespace Diffn {
 }
 
 /*
- * Post the constraint that the rectangles defined by the coordinates
- * x and y and width w and height h do not overlap.
+ * Post the constraint that the lines defined by the coordinates
+ * x and lengths w do not overlap.
  */
 void diffn(Home home,
            const IntVarArgs& x, const IntArgs& w) {
@@ -1160,3 +1250,56 @@ void diffn(Home home,
     home.fail();
 }
 
+/*
+ * Post the constraint that the cuboids defined by the coordinates
+ * x, y, and z, along with their widths w, heights h, and depths l do not overlap.
+ */
+void diffn(Home home,
+           const IntVarArgs& x, const IntArgs& w,
+           const IntVarArgs& y, const IntArgs& h,
+           const IntVarArgs& z, const IntArgs& l) {
+  // Check whether the arguments make sense
+  if ((x.size() != y.size()) || (x.size() != w.size()) ||
+      (y.size() != h.size()) || (y.size() != z.size()) ||
+      (z.size() != l.size()))
+    throw ArgumentSizeMismatch("nooverlap");
+  // Never post a propagator in a failed space
+  if (home.failed()) return;
+  // Set up arrays (allocated in home) for width and height and initialize
+  int* wc = static_cast<Space&>(home).alloc<int>(x.size());
+  int* hc = static_cast<Space&>(home).alloc<int>(y.size());
+  int* lc = static_cast<Space&>(home).alloc<int>(z.size());
+  for (int i=x.size(); i--; ) {
+    wc[i]=w[i]; hc[i]=h[i]; lc[i]=l[i];
+  }
+  // If posting failed, fail space
+  if (Diffn::Diffn::post(home,x,wc,y,hc,z,lc) != ES_OK)
+    home.fail();
+}
+
+/* Post the constraint that the k-dimensional hyperrectangles defined by the coordinates stored in
+ * x along with the side-lengths stored in l, do not overlap.
+ *
+ * Here, hyperrectnangle object i is represented by its coordinates 
+ *   x[i*k], x[i*k+1], .., x[i*k+k] 
+ * and its side-lengths
+ *   l[i*k], l[i*k+1], .., x[i*k+k]
+ */
+void diffn(Home home,
+           const IntVarArgs& x, const IntArgs& l,
+           int k) {
+  // Check whether the arguments make sense
+  if ((x.size() != l.size()) ||
+      (x.size() % k != 0)) // We require that the x.size() is divisable by k 
+    throw ArgumentSizeMismatch("nooverlap");
+  // Never post a propagator in a failed space
+  if (home.failed()) return;
+  // Set up arrays (allocated in home) for lengths and initialize
+  int* lc = static_cast<Space&>(home).alloc<int>(l.size());
+  for (int i=x.size(); i--; ) {
+    lc[i]=l[i];
+  }
+  // If posting failed, fail space
+  if (Diffn::Diffn::post(home,x,lc,k) != ES_OK)
+    home.fail();
+}
