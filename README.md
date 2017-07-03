@@ -1,5 +1,7 @@
 # Sweep-Based Propagator for Diffn
 
+Report: http://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845
+
 An implementation of a sweep-based propagator for the [Diffn](http://web.emn.fr/x-info/sdemasse/gccat/Cdiffn.html) constraint in the copying constraint programming solver [Gecode](http://www.gecode.org/). Builds on the ideas of Beldiceanu and Carlsson from their paper [Sweep as a generic pruning technique applied to the non-overlapping rectangles constraint (2001)](https://link.springer.com/chapter/10.1007%2F3-540-45578-7_26).
 
 # Usage
@@ -40,10 +42,6 @@ Include the file `sweep.cpp` in a constraint programming model written in Gecode
 * `x`: IntVarArgs represent the origin coordinates of the hyperrectangle (defined as the lexicographically smallest point). Here, hyperrectangle object *i* is represented by the coordinates `x[i*k]`, `x[i*k+1]`, .., `x[i*k+k]`. Where `x[i*k]` represents *i*'s coordinate in dimension 0 (or x), `x[i*k+1]` its coordinate in dimension 1 (or y) etc.
 * `l`: IntArgs represent the side-length of the hyperrectangles. Here, the side-lengths of a hyperrectangle object *i* is represented by the values `l[i*k]`, `l[i*k+1]`, .., `l[i*k+k]`. 
 * `k`: Int represents the dimensionality of the hyperrectangles.
-
-# Report
-
-A MSc thesis describing and evaluating the propagator is currently awaiting publication. This entry in the readme will later point you to it.
 
 # Notes
 
